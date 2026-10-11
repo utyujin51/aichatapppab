@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.ai.base import AIError
-from app.ai.gemini import GeminiProvider
+from app.ai.gemini import GeminiProvider, TRANSIENT_RETRY_BASE_DELAY
 
 
 @pytest.mark.parametrize(
@@ -62,6 +62,38 @@ def test_non_fallback_model_keeps_existing_transient_rate_limit_retries(monkeypa
     ]
 
 
+def test_flash_lite_retries_transient_server_error_with_backoff(monkeypatch):
+    provider = GeminiProvider("test-key")
+    responses = [
+        Mock(status_code=503, text='{"error":{"message":"temporarily unavailable"}}'),
+        Mock(
+            status_code=200,
+            text='{"choices":[{"message":{"content":"ok"}}]}',
+            json=lambda: {"choices": [{"message": {"content": "ok"}}]},
+        ),
+    ]
+    calls = []
+    sleeps = []
+
+    def send_request(*_args):
+        calls.append("request")
+        return responses.pop(0)
+
+    monkeypatch.setattr(provider, "_send_request", send_request)
+    monkeypatch.setattr("app.ai.gemini.time.sleep", lambda delay: sleeps.append(delay))
+
+    content = provider.generate(
+        model="gemini-3.1-flash-lite",
+        messages=[],
+        temperature=0.2,
+        max_tokens=128,
+    )
+
+    assert content == "ok"
+    assert len(calls) == 2
+    assert sleeps == [TRANSIENT_RETRY_BASE_DELAY]
+
+
 def test_gemini_invalid_auth_key_response_is_classified_as_invalid_api_key():
     provider = GeminiProvider("test-key")
     response = Mock(status_code=400, text='{"error":{"message":"Invalid Auth key"}}')
@@ -102,7 +134,9 @@ def test_gemini_error_body_is_not_logged_or_returned(monkeypatch, caplog):
         status_code=500,
         text='{"error":{"message":"PRIVATE_ERROR_SENTINEL"}}',
     )
-    monkeypatch.setattr(provider, "_send_request", lambda *_args: response)
+    calls = []
+    monkeypatch.setattr(provider, "_send_request", lambda *_args: calls.append("request") or response)
+    monkeypatch.setattr("app.ai.gemini.time.sleep", lambda _delay: None)
 
     with pytest.raises(AIError) as exc_info:
         provider.generate(
@@ -114,6 +148,7 @@ def test_gemini_error_body_is_not_logged_or_returned(monkeypatch, caplog):
 
     assert "PRIVATE_ERROR_SENTINEL" not in caplog.text
     assert "PRIVATE_ERROR_SENTINEL" not in str(exc_info.value)
+    assert len(calls) == provider.MAX_RETRIES
 
 
 def test_gemini_embedded_error_details_are_not_logged_or_returned(monkeypatch, caplog):

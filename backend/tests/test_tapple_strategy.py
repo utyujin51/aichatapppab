@@ -8,10 +8,20 @@ import pytest
 
 from app.ai import prompt
 from app.routers.generation import (
+    _build_tapple_acknowledged_decline_closing_fallbacks,
+    _build_safe_tapple_fallback_strategy,
     _build_repair_messages,
+    _build_tapple_counterproposal_schedule_check_fallbacks,
+    _build_tapple_disliked_activity_decline_fallbacks,
+    _build_tapple_disliked_activity_interest_fallbacks,
+    _build_tapple_low_reciprocity_echo_fallback,
+    _build_tapple_low_engagement_closing_fallbacks,
+    _build_tapple_shared_interest_invite_fallback,
     _repair_violation_categories,
+    _repair_violation_category,
     _is_tapple_private_place_proposal,
     _parse_replies_strict,
+    _repair_tapple_output_instruction,
     _parse_tapple_strategy as _parse_tapple_strategy_messages,
     _build_safe_tapple_fallback_strategy,
     _tapple_strategy_output_violations,
@@ -59,6 +69,147 @@ def test_generic_prompt_is_unchanged_without_tapple_opt_in():
         system_prompt="system", chat_history_text="相手: こんにちは", candidates=3
     )
     assert "タップル会話戦略" not in generic[1]["content"]
+
+
+def test_tapple_wait_replies_must_acknowledge_unresolved_meeting_concern():
+    conversation = [
+        {"sender": "contact", "content": "直接会うのは少し不安です"},
+        {"sender": "self", "content": "無理に決めなくて大丈夫です"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+
+    generic = validate_candidate_replies(
+        ["大丈夫ですよ", "ゆっくりいきましょう", "焦らなくて大丈夫です"],
+        3,
+        counterpart_message="そうですね",
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation,
+    )
+    grounded = validate_candidate_replies(
+        [
+            "直接会うのは不安ですよね。急がずメッセージで話しましょう",
+            "会うことは焦らなくて大丈夫です。ここで話していきましょう",
+            "不安な気持ちを大事にして、会うのは安心できてからで大丈夫です",
+        ],
+        3,
+        counterpart_message="そうですね",
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation,
+    )
+
+    assert any("会うことへの迷い" in violation for violation in generic)
+    assert not any("会うことへの迷い" in violation for violation in grounded)
+
+    contradictory = validate_candidate_replies(
+        ["会うのは楽しみですね！", "会うのもいいですね", "直接会うのが楽しみです"],
+        3,
+        counterpart_message="そうですね",
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation,
+    )
+    assert any("会うことへの迷い" in violation for violation in contradictory)
+
+
+def test_tapple_reply_rejects_unverified_photo_reaction_and_personal_history():
+    conversation = [
+        {"sender": "self", "content": "駅前のカフェが気になっています"},
+        {"sender": "contact", "content": "私もそのカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["写真で見るとおいしそうですね。僕もずっと気になってました"],
+        1,
+        counterpart_message="私もそのカフェに行ってみたいです",
+        strategy_mode="tapple",
+        tapple_action="invite",
+        conversation_messages=conversation,
+    )
+
+    assert any("写真を見たような" in violation for violation in violations)
+    assert any("関心の期間" in violation for violation in violations)
+
+
+def test_tapple_invitation_does_not_invent_a_specific_venue():
+    conversation = [
+        {"sender": "contact", "content": "ボルダリングに興味があります"},
+        {"sender": "self", "content": "僕もボルダリングが好きです"},
+        {"sender": "contact", "content": "最近はじめたところです。体験してみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["今度一緒に駅前のジムに行ってみませんか？"],
+        1,
+        counterpart_message="最近はじめたところです。体験してみたいです",
+        strategy_mode="tapple",
+        tapple_action="invite",
+        conversation_messages=conversation,
+    )
+
+    assert any("未確認の店や場所" in violation for violation in violations)
+
+
+def test_tapple_parser_waits_when_two_short_acknowledgments_follow_a_topic_shift():
+    conversation = (
+        "相手: 映画が好きで、休日はいろいろ観ます。最近はミステリーを観て、すごく面白かったです！\n"
+        "自分: ミステリーいいですね。どんな作品が好きですか？\n"
+        "相手: ミステリーとか好きです\n"
+        "自分: 最近気になるお店があるんです\n"
+        "相手: そうですね\n"
+        "自分: 駅前のカフェなんですけど\n"
+        "相手: うん"
+    )
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "カフェの話題を続けます。",
+            "evidence": ["うん"],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+def test_tapple_low_engagement_fallback_closes_without_questions():
+    conversation = [
+        {"sender": "contact", "content": "映画が好きです。ミステリーが面白かったです！"},
+        {"sender": "self", "content": "どんな作品が好きですか？"},
+        {"sender": "contact", "content": "ミステリーとか好きです"},
+        {"sender": "self", "content": "最近気になるお店があるんです"},
+        {"sender": "contact", "content": "そうですね"},
+        {"sender": "self", "content": "駅前のカフェなんですけど"},
+        {"sender": "contact", "content": "うん"},
+    ]
+
+    result = _build_tapple_low_engagement_closing_fallbacks(conversation, 3)
+
+    assert result is not None
+    replies, strategy = result
+    assert strategy.action == "wait"
+    assert len(replies) == 3
+    assert all("?" not in reply and "？" not in reply for reply in replies)
+
+
+def test_tapple_prompt_requires_grounded_activity_replies_and_specific_boundary_acknowledgment():
+    system_prompt = prompt.build_system_prompt(
+        contact={"name": "相手"}, strategy_mode="tapple"
+    )
+    initial = prompt.build_initial_generation_messages(
+        system_prompt=system_prompt,
+        chat_history_text="相手: こんにちは",
+        strategy_mode="tapple",
+    )
+    initial_text = "\n".join(message["content"] for message in initial)
+
+    assert "写真や画像がないのに" in initial_text
+    assert "会うことへの迷い" in initial_text
+    assert "未確認の店" in initial_text
 
 
 def test_tapple_system_and_generation_prompts_share_one_compatible_json_contract():
@@ -132,6 +283,25 @@ def test_tapple_prompt_treats_reciprocal_near_term_activity_interest_as_invite_r
     assert "短い相づちだけの場合は誘いません" in instruction
 
 
+def test_tapple_prompt_distinguishes_independent_interest_from_echoed_suggestion():
+    messages = prompt.build_initial_generation_messages(
+        system_prompt="system",
+        chat_history_text=(
+            "相手: カフェ巡りが好きです。パンケーキもよく食べます\n"
+            "自分: 僕もカフェ好きです。パンケーキもよく食べます\n"
+            "相手: そうなんですね\n"
+            "自分: 駅前のパンケーキのお店も気になってます\n"
+            "相手: 駅前のパンケーキのお店、近いうちに行ってみたいです"
+        ),
+        candidates=1,
+        strategy_mode="tapple",
+    )
+
+    instruction = messages[1]["content"]
+    assert "活動・場所の提案を言い換えただけ" in instruction
+    assert "新しい具体情報を自発的に加え" in instruction
+
+
 def test_tapple_prompt_keeps_reply_grounded_when_invite_is_recommended():
     messages = prompt.build_initial_generation_messages(
         system_prompt="system",
@@ -149,6 +319,9 @@ def test_tapple_prompt_keeps_reply_grounded_when_invite_is_recommended():
     assert "action=inviteの場合、各返信候補にも会話で根拠づけられる低圧な誘いを含め" in instruction
     assert "相手が関心を示した同じ活動へ誘ってください" in instruction
     assert "action=continueやwaitなどinvite以外の場合に" in instruction
+    assert "本人が会話中で同じ活動を苦手・不興味と伝えていて" in instruction
+    assert "明確に関心を取り戻したと訂正していない場合" in instruction
+    assert "本人が実際に好みを述べた話題に限ってください" in instruction
     assert "invite_exampleは誘いの方向性を示す別例" in instruction
     assert "その文面を候補へそのままコピーしない" in instruction
     assert "質問形で相手の意向を尋ねる提案" in instruction
@@ -1400,9 +1573,9 @@ def test_tapple_benchmark_does_not_use_another_interest_to_clear_disinterest():
             "invite_example": None,
         },
         "replies": [
-            "映画が好きなんですね！最近観て印象に残った作品ありますか？",
-            "映画いいですね、最近なにか観ましたか？",
-            "どんなジャンルの映画をよく観ますか？",
+            "カフェは苦手なので、今回は遠慮します。",
+            "カフェは苦手です。今回はやめておきます。",
+            "カフェは苦手なので、今回は難しいです。",
         ],
     }
     assert run_tapple_strategy_benchmark._evaluate_result(scenario, result) == []
@@ -1445,6 +1618,1264 @@ def test_activity_interest_pair_runs_through_production_strategy_parser(scenario
 
     assert parsed is not None
     assert parsed.action == parsed_action
+
+
+def test_standalone_activity_interest_with_weak_reciprocity_is_wait_not_continue():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手の行きたい気持ちに自然に反応します。",
+            "evidence": [scenario["messages"][-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, scenario["messages"])
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+def test_low_reciprocity_replies_must_not_echo_the_users_own_recent_suggestion():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+    replies = [
+        "パンケーキのお店、気になりますよね",
+        "駅前のお店、私も気になってました！",
+        "駅前のところ気になりますよね！",
+    ]
+
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=scenario["messages"][-1]["content"],
+        conversation_messages=scenario["messages"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("一歩進める自然な質問" in violation for violation in violations)
+    fallback = _build_tapple_low_reciprocity_echo_fallback(scenario["messages"], 3)
+    assert fallback is not None
+    fallback_replies, strategy = fallback
+    assert strategy.action == "wait"
+    assert len(set(fallback_replies)) == 3
+    assert validate_candidate_replies(
+        fallback_replies,
+        expected_candidates=3,
+        counterpart_message=scenario["messages"][-1]["content"],
+        conversation_messages=scenario["messages"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+    ) == []
+    assert any(
+        "一歩進める自然な質問" in violation
+        for violation in validate_candidate_replies(
+            [replies[0]],
+            expected_candidates=1,
+            counterpart_message=scenario["messages"][-1]["content"],
+            conversation_messages=scenario["messages"],
+            strategy_mode="tapple",
+            tapple_action="wait",
+        )
+    )
+
+
+def test_low_reciprocity_rejects_question_that_echoes_the_last_self_message():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+
+    violations = validate_candidate_replies(
+        ["駅前のお店って、どんなパンケーキがあるか気になりますか？"],
+        expected_candidates=1,
+        counterpart_message=scenario["messages"][-1]["content"],
+        conversation_messages=scenario["messages"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("一歩進める自然な質問" in violation for violation in violations)
+
+
+def test_low_reciprocity_allows_open_question_that_reuses_activity_subject():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+
+    violations = validate_candidate_replies(
+        ["駅前のパンケーキなら、甘さはどれくらいが好きですか？"],
+        expected_candidates=1,
+        counterpart_message=scenario["messages"][-1]["content"],
+        conversation_messages=scenario["messages"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("一歩進める自然な質問" in violation for violation in violations)
+
+
+def test_low_reciprocity_rejects_unstated_shop_facts_and_self_echoes():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+    replies = [
+        "いいですね！やっぱり人気のお店なんですか？",
+        "僕もずっと気になってたお店なんです！パンケーキ以外にも何か食べてみたいメニューとかありますか？",
+        "わかります、あそこのパンケーキ気になりますよね。普段は甘いものだと何が好きなんですか？",
+    ]
+
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=scenario["messages"][-1]["content"],
+        conversation_messages=scenario["messages"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("一歩進める自然な質問" in violation for violation in violations)
+
+
+def test_low_reciprocity_fallback_does_not_assume_a_specific_shop_exists():
+    conversation = [
+        {"sender": "contact", "content": "ラーメンが好きです"},
+        {"sender": "self", "content": "駅前のラーメンが気になってます"},
+        {"sender": "contact", "content": "そうなんですね"},
+        {"sender": "self", "content": "ラーメンが気になってます"},
+        {"sender": "contact", "content": "ラーメンを食べてみたいです"},
+    ]
+
+    result = _build_tapple_low_reciprocity_echo_fallback(conversation, 3)
+
+    assert result is not None
+    replies, _strategy = result
+    assert all("店" not in reply for reply in replies)
+
+
+def test_low_reciprocity_echo_fallback_runs_after_retries(client, monkeypatch):
+    from app import database
+
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "shared_activity_low_reciprocity"
+    )
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手の関心に自然に反応します。",
+            "evidence": [scenario["messages"][-1]["content"]],
+            "invite_example": None,
+        },
+        replies=[
+            "パンケーキのお店、気になりますよね",
+            "駅前のお店、私も気になってました！",
+            "駅前のところ気になりますよね！",
+        ],
+    )
+
+    class RepeatingProvider:
+        name = "gemini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **_kwargs):
+            self.calls += 1
+            return raw
+
+        def available_models(self):
+            return ["gemini-3.5-flash-lite"]
+
+    provider = RepeatingProvider()
+    monkeypatch.setattr("app.routers.generation.factory.get_provider", lambda *_args: provider)
+    monkeypatch.setattr(
+        "app.routers.generation.get_ai_config",
+        lambda: {
+            "provider": "gemini",
+            "model": "gemini-3.5-flash-lite",
+            "api_key": "test-key",
+            "temperature": 0.2,
+            "max_tokens": 512,
+            "history_limit": 50,
+            "fallback_provider": "gemini",
+            "fallback_model": "gemini-3.1-flash-lite",
+            "fallback_api_key": "test-key",
+            "secondary_api_key": "",
+        },
+    )
+    monkeypatch.setattr("app.routers.generation.time.sleep", lambda *_args: None)
+    database.set_setting("ai_provider", "gemini")
+    database.set_setting("ai_model", "gemini-3.5-flash-lite")
+    database.set_setting("api_key_gemini", "test-key")
+
+    contact_id = client.post("/api/contacts", json={"name": "反応の薄い相手"}).json()["id"]
+    for message in scenario["messages"]:
+        client.post(
+            f"/api/contacts/{contact_id}/messages",
+            json={"sender": message["sender"], "content": message["content"]},
+        )
+
+    response = client.post(
+        "/api/generate",
+        json={"contact_id": contact_id, "candidates": 3, "strategy_mode": "tapple"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert provider.calls == 6
+    assert len(set(payload["replies"])) == 3
+    assert payload["strategy"]["action"] == "wait"
+
+
+def test_continue_is_promoted_for_a_new_shared_activity_the_contact_wants_to_try():
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == "unlisted_shared_hobby"
+    )
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手の新しい活動の話に自然に反応します。",
+            "evidence": [scenario["messages"][-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, scenario["messages"])
+
+    assert parsed is not None
+    assert parsed.action == "invite"
+    assert parsed.invite_example == "よかったら今度、ボルダリングジムに一緒に行ってみませんか？"
+
+
+def test_solo_activity_preference_is_not_promoted_to_invitation():
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "僕もカフェが好きです"},
+        {"sender": "contact", "content": "今度は一人でカフェに行ってみたいです"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "共通の活動に関心があります。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+    fallback = _build_tapple_shared_interest_invite_fallback(conversation, 3)
+
+    assert parsed is not None
+    assert parsed.action != "invite"
+    assert fallback is None
+
+
+@pytest.mark.parametrize(
+    "solo_preference_clause",
+    [
+        "一人でカフェに行きたいわけではなく、誰かと行ってみたいです",
+        "一人でカフェに行きたいのではなく、友達と行ってみたいです",
+        "一人でカフェに行きたいってわけじゃなくて、誰かと行ってみたいです",
+        "一人でカフェに行きたいんじゃなくて、友達と行ってみたいです",
+    ],
+)
+def test_explicit_reversal_of_solo_preference_allows_shared_activity_invitation(solo_preference_clause):
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "僕もカフェが好きです"},
+        {
+            "sender": "contact",
+            "content": solo_preference_clause,
+        },
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手は誰かと行きたいと述べています。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+    fallback = _build_tapple_shared_interest_invite_fallback(conversation, 3)
+
+    assert parsed is not None
+    assert parsed.action == "invite"
+    assert fallback is not None
+
+
+@pytest.mark.parametrize(
+    "scenario_id",
+    ["recent_activity_disinterest", "different_activity_does_not_clear_disinterest"],
+)
+def test_recent_activity_disinterest_overrides_continue_strategy(scenario_id):
+    scenario = next(
+        scenario
+        for scenario in run_tapple_strategy_benchmark.SCENARIOS
+        if scenario["id"] == scenario_id
+    )
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手がカフェに関心を示しているため、話題を続けます。",
+            "evidence": [scenario["messages"][-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, scenario["messages"])
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+def test_recent_activity_disinterest_does_not_block_a_different_current_activity():
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": "今度一緒に映画を観に行きたいです"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手が映画に一緒に行きたいと伝えています。",
+            "evidence": ["カフェ巡りが好きです", "今度一緒に映画を観に行きたいです"],
+            "invite_example": "よかったら今度映画を観に行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "invite"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "駅前のカフェも気になる？",
+        "駅前のお店は気になる？",
+        "駅前のカフェに行ってみたいんですか？",
+        "駅前のカフェに行ってみたいんですか",
+        "駅前のカフェに興味ありますか？",
+        "駅前のカフェに興味ありますか",
+        "駅前のカフェが気になっていますか？",
+        "駅前のカフェに興味を持っていますか？",
+        "駅前のカフェに行ってみたいと思いますか",
+    ],
+)
+def test_recent_activity_disinterest_does_not_reask_contact_interest_already_stated(reply):
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "僕もカフェが好きです"},
+        {"sender": "contact", "content": "パンケーキは何が好きですか？"},
+        {"sender": "self", "content": "プリンが好きです。カフェはあまり好きではないです"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation,
+    )
+
+    assert any("関心を聞き直しています" in violation for violation in violations)
+
+
+def test_recent_activity_disinterest_allows_followup_about_details_not_interest():
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "カフェはあまり好きではないです"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        [
+            "カフェのどんなところが気になる？",
+            "どんなメニューがあるお店なの？",
+            "駅前のお店はどんなところなんだろう？",
+        ],
+        expected_candidates=3,
+        counterpart_message=conversation[-1]["content"],
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation,
+    )
+
+    assert not any("関心を聞き直しています" in violation for violation in violations)
+
+
+def test_reasked_disliked_activity_interest_uses_targeted_tapple_repair_guidance():
+    violation = (
+        "案1が本人の苦手な活動への相手の関心を聞き直しています。"
+        "相手がすでに伝えた希望を再確認せず、会話にある本人の好みも踏まえて返してください。"
+    )
+
+    categories = _repair_violation_category(violation)
+    instruction = _repair_tapple_output_instruction(
+        3, "wait", categories=frozenset(categories)
+    )
+
+    assert "reasked_disliked_activity_interest" in categories
+    assert "行きたいか・気になるかを聞き直さないでください" in instruction
+
+
+def test_disinterest_mention_in_latest_message_does_not_block_inviting_a_different_activity():
+    latest_contact = "カフェは苦手と聞きましたが、今度一緒に映画を観に行きたいです"
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": latest_contact},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手が映画に一緒に行きたいと伝えています。",
+            "evidence": [latest_contact],
+            "invite_example": "よかったら今度映画を観に行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "invite"
+
+
+@pytest.mark.parametrize(
+    "latest_contact",
+    [
+        "カフェは苦手と聞きましたが、映画は好きです",
+        "カフェは好きではないけど、映画は好きです",
+    ],
+)
+def test_same_message_disinterest_does_not_suppress_continue_about_another_activity(
+    latest_contact,
+):
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": latest_contact},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "相手が映画への関心を伝えています。",
+            "evidence": [latest_contact],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "continue"
+
+
+def test_latest_positive_interest_does_not_override_users_disinterest_in_invitation_target():
+    latest_contact = "あなたはカフェが苦手だと聞きましたが、私は今は好きで、今度一緒に行きたいです"
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": latest_contact},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手がカフェに一緒に行きたいと伝えています。",
+            "evidence": [latest_contact],
+            "invite_example": "よかったら今度カフェに行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+def test_explicit_later_self_correction_clears_prior_activity_disinterest():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手でした"},
+        {"sender": "self", "content": "でも今は好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手がカフェに一緒に行きたいと伝えています。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": "よかったら今度カフェに行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "invite"
+
+
+def test_negative_later_self_correction_does_not_clear_activity_disinterest():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手でした"},
+        {"sender": "self", "content": "でも今は好きではないです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手がカフェに一緒に行きたいと伝えています。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": "よかったら今度カフェに行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+@pytest.mark.parametrize(
+    "correction",
+    [
+        "でも今は好きというわけではないです",
+        "でも今は好きとは言えないです",
+        "でも今は好きとは限りません",
+        "でも今は好きでもないです",
+    ],
+)
+def test_qualified_negative_later_self_correction_does_not_clear_disinterest(
+    correction,
+):
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手でした"},
+        {"sender": "self", "content": correction},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "invite",
+            "rationale": "相手がカフェに一緒に行きたいと伝えています。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": "よかったら今度カフェに行きませんか？",
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert parsed is not None
+    assert parsed.action == "wait"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "カフェ巡り楽しそうですね！駅前なら行きやすくて良さそうです",
+        "駅前だと寄りやすくていいですよね！",
+        "駅前なら色々なお店がありそうですよね！",
+        "駅前のカフェ気になってるんだ",
+        "駅前のカフェ気になってるよ",
+        "駅前のカフェ気になってるんだよね",
+        "駅前のカフェ気になってるんです",
+        "駅前のカフェが気になっています",
+        "駅前のカフェが気になってます",
+        "駅前のカフェ気になってるかも",
+        "駅前のカフェ気になるよ",
+        "駅前のカフェ気になるかも",
+        "駅前のカフェ気になるんです",
+        "駅前のカフェ気になりますよ",
+        "駅前のカフェに行きたいよ",
+        "駅前のカフェ楽しそうだよ",
+        "駅前のカフェに行きたいんだよ",
+        "駅前のカフェに行ってみたいです",
+        "駅前のカフェに行ってみたいんだよ",
+        "駅前のカフェに行ってみたいんです",
+        "駅前のカフェに行きたいんです",
+        "駅前のカフェ、今度行けたらいいな",
+        "駅前のカフェ、行けたら嬉しいです",
+        "駅前のカフェは良さそうです",
+        "駅前のカフェは行きやすそうです",
+        "カフェ巡り楽しそうだと思います",
+        "駅前のカフェに興味ありますよ",
+        "駅前のカフェに興味あるよ",
+        "駅前のカフェに興味あるんだ",
+        "駅前のカフェに興味あるんです",
+        "駅前のカフェ好きだよ",
+        "駅前のカフェもいいと思うよ",
+        "駅前のカフェもいいと思います",
+        "駅前のカフェいいよね",
+        "駅前のカフェ気になるよね！",
+        "カフェ巡り楽しそう！映画も好きです",
+        "カフェは苦手ですが、カフェ巡り楽しそうですね！",
+    ],
+)
+def test_wait_reply_cannot_falsely_endorse_an_activity_the_user_dislikes(reply):
+    conversation = [
+        {"sender": "self", "content": "カフェはあまり好きではないです"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("苦手意識" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "カフェは苦手なんだけど、何が気になるの？",
+        "カフェは苦手なんだけど、駅前のカフェ気になってるんだ？",
+        "カフェは苦手だけど、気になるなんて言ってないよ",
+        "カフェは苦手だけど、あなたはカフェに行きたいですか？",
+        "カフェは苦手だけど、カフェに興味ありますか？",
+        "カフェは苦手だけど、カフェって行きやすいですか？",
+        "カフェは苦手だけど、駅前のカフェ寄りやすいですか？",
+        "カフェは苦手だけど、カフェって楽しそうですか？",
+        "カフェは苦手だけど、カフェ好きですよね？",
+        "カフェは苦手だけど、カフェに行ってみたいですか？",
+        "カフェは苦手だけど、カフェに行きたいんですか？",
+        "カフェは苦手だけど、今度行けたらいいな？",
+        "カフェは苦手だけど、行けたら嬉しいですか？",
+        "カフェは苦手だけど、カフェに興味あるんですか？",
+        "カフェは苦手だけど、駅前のカフェ気になってるんですか？",
+        "カフェは苦手だけど、駅前のカフェが気になっていますか？",
+        "カフェは苦手だけど、カフェ巡り楽しそうだと思いますか？",
+        "カフェは苦手だけど、一緒に行きたくないな",
+        "カフェは苦手だけど、一緒に行きたいなんて言ってないよ",
+        "カフェは苦手だけど、一緒に行こうよとは言ってない",
+    ],
+)
+def test_wait_reply_can_ask_about_contact_interest_without_endorsing_disliked_activity(reply):
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("苦手意識" in violation for violation in violations)
+
+
+def test_wait_reply_to_disliked_activity_invitation_must_decline_or_state_disinterest():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["どんな映画が好きなんですか？"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("意思を明確" in violation for violation in violations)
+
+
+def test_wait_reply_to_direct_question_invitation_of_disliked_activity_must_decline():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きませんか？"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["どんな映画が好きなんですか？"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("意思を明確" in violation for violation in violations)
+
+
+def test_wait_reply_to_reported_third_party_invitation_does_not_require_declining():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "友達が『今度一緒にカフェに行きたい』と言っていました"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画は好きです"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("意思を明確" in violation for violation in violations)
+
+
+def test_wait_reply_to_reported_past_invitation_does_not_require_declining():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "前に『今度一緒にカフェに行きたい』って言ってたよね"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画は好きです"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("意思を明確" in violation for violation in violations)
+
+
+def test_wait_reply_to_disliked_activity_invitation_can_explicitly_decline():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["カフェは苦手なので、一緒に行くのは難しいです"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("意思を明確" in violation for violation in violations)
+    assert not any("未確認の希望" in violation for violation in violations)
+
+
+def test_wait_reply_without_a_direct_invitation_can_redirect_to_known_interest():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画は好きです"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("意思を明確" in violation for violation in violations)
+
+
+def test_wait_reply_can_state_disinterest_and_pivot_to_another_activity():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手で、最近は映画が好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["カフェは少し苦手で、最近は映画が好きなんです。映画はお好きですか？"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("苦手意識" in violation for violation in violations)
+
+
+def test_tapple_replies_can_restate_the_latest_self_preference_without_desire_false_positive():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手でした。今は映画が好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["カフェは苦手なので、今回は遠慮しておきます。"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("未確認の希望" in violation for violation in violations)
+
+
+def test_tapple_latest_self_disinterest_overrides_an_older_positive_preference_fact():
+    conversation = [
+        {"sender": "self", "content": "猫は好きです"},
+        {"sender": "self", "content": "猫は苦手です"},
+        {"sender": "contact", "content": "猫を飼っているんです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["僕も猫好きです"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        known_self_facts=["猫は好きです", "猫は苦手です"],
+        strategy_mode="tapple",
+        tapple_action="continue",
+        conversation_messages=conversation,
+    )
+
+    assert any("未確認の希望" in violation for violation in violations)
+
+
+def test_tapple_latest_self_message_updates_all_topics_not_only_first_preference():
+    conversation = [
+        {"sender": "self", "content": "映画は苦手です"},
+        {"sender": "self", "content": "猫は好きです。映画も好きです"},
+        {"sender": "contact", "content": "最近映画を見ました"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画は苦手です"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        known_self_facts=["映画は苦手です", "猫は好きです", "映画も好きです"],
+        strategy_mode="tapple",
+        tapple_action="continue",
+        conversation_messages=conversation,
+    )
+
+    assert any("未確認の希望" in violation for violation in violations)
+
+
+def test_tapple_disliked_activity_invitation_fallback_is_hard_validated():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手でした。今は映画が好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    replies = _build_tapple_disliked_activity_decline_fallbacks(conversation, 3)
+
+    assert replies == [
+        "カフェは苦手なので、今回は遠慮します。",
+        "カフェは苦手です。今回はやめておきます。",
+        "カフェは苦手なので、今回は難しいです。",
+    ]
+    assert validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    ) == []
+
+
+def test_tapple_disliked_activity_interest_fallback_is_hard_validated():
+    conversation = [
+        {"sender": "self", "content": "カフェはあまり好きではないです"},
+        {"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    ]
+
+    replies = _build_tapple_disliked_activity_interest_fallbacks(conversation, 3)
+
+    assert replies is not None and len(replies) == 3
+    assert all("カフェ" in reply for reply in replies)
+    assert all(
+        any(word in reply for word in ("好きではない", "好みではない", "得意ではない"))
+        for reply in replies
+    )
+    assert validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    ) == []
+
+
+def test_tapple_disliked_activity_interest_fallback_is_not_used_for_invites_or_other_topics():
+    disinterest = {"sender": "self", "content": "カフェは苦手です"}
+    direct_invite = [
+        disinterest,
+        {"sender": "contact", "content": "今度一緒にカフェへ行きませんか？"},
+    ]
+    other_activity = [
+        disinterest,
+        {"sender": "contact", "content": "今度一緒に映画を観に行きたいです"},
+    ]
+    third_party_interest = [
+        disinterest,
+        {"sender": "contact", "content": "友達が『今度一緒にカフェに行きたい』と言っていました"},
+    ]
+    non_cafe_interest = [
+        {"sender": "self", "content": "美術館は苦手です"},
+        {"sender": "contact", "content": "今度美術館に行ってみたいです"},
+    ]
+
+    assert _build_tapple_disliked_activity_interest_fallbacks(direct_invite, 3) is None
+    assert _build_tapple_disliked_activity_interest_fallbacks(other_activity, 3) is None
+    assert _build_tapple_disliked_activity_interest_fallbacks(third_party_interest, 3) is None
+    assert _build_tapple_disliked_activity_interest_fallbacks(non_cafe_interest, 3) is None
+
+
+def test_shared_interest_invite_fallback_returns_distinct_hard_valid_replies():
+    conversation = [
+        {"sender": "contact", "content": "ボルダリングに興味があります"},
+        {"sender": "self", "content": "僕もボルダリングが好きです"},
+        {
+            "sender": "contact",
+            "content": "最近はじめたところです。ボルダリングを体験してみたいです！",
+        },
+    ]
+
+    result = _build_tapple_shared_interest_invite_fallback(conversation, 3)
+
+    assert result is not None
+    replies, strategy = result
+    assert len(set(replies)) == 3
+    assert all("ボルダリング" in reply for reply in replies)
+    assert strategy.action == "invite"
+    assert strategy.invite_example
+    assert validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="invite",
+    ) == []
+
+
+def test_shared_pancake_interest_in_shop_sentence_still_builds_safe_invite():
+    conversation = [
+        {"sender": "contact", "content": "最近カフェ巡りにはまっています。駅前のパンケーキのお店が気になっていて"},
+        {"sender": "self", "content": "僕もカフェ好きです。パンケーキもよく食べます"},
+        {"sender": "contact", "content": "甘いものだと何が好きですか？"},
+        {"sender": "self", "content": "パンケーキやプリンが好きです。新しいお店を探すのも楽しいですよね"},
+        {"sender": "contact", "content": "駅前のパンケーキのお店、写真を見たらおいしそうで近いうちに行ってみたいです！"},
+    ]
+
+    result = _build_tapple_shared_interest_invite_fallback(conversation, 3)
+
+    assert result is not None
+    replies, strategy = result
+    assert strategy.action == "invite"
+    assert strategy.invite_example == "よかったら今度、カフェに一緒に行ってみませんか？"
+    assert all("パンケーキ" in reply and "一緒に" in reply for reply in replies)
+    assert validate_candidate_replies(
+        replies,
+        expected_candidates=3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="invite",
+    ) == []
+
+
+def test_shared_interest_fallback_uses_current_positive_activity_not_older_negative_one():
+    conversation = [
+        {"sender": "contact", "content": "パンケーキも映画も好きです"},
+        {"sender": "self", "content": "僕もパンケーキと映画が好きです"},
+        {"sender": "contact", "content": "パンケーキは苦手ですが、映画を見てみたいです"},
+    ]
+
+    result = _build_tapple_shared_interest_invite_fallback(conversation, 3)
+
+    assert result is not None
+    replies, strategy = result
+    assert strategy.action == "invite"
+    assert strategy.invite_example == "よかったら今度、映画館に一緒に行ってみませんか？"
+    assert all("映画" in reply for reply in replies)
+    assert all("パンケーキ" not in reply for reply in replies)
+
+
+def test_shared_interest_invite_fallback_excludes_third_party_interest():
+    conversation = [
+        {"sender": "contact", "content": "カフェ巡りが好きです"},
+        {"sender": "self", "content": "僕もカフェが好きです"},
+        {"sender": "contact", "content": "友達が『一緒にカフェに行きたい』と言っていました"},
+    ]
+
+    assert _build_tapple_shared_interest_invite_fallback(conversation, 3) is None
+
+
+def test_reported_third_party_activity_interest_does_not_promote_continue_to_invite():
+    conversation = [
+        {"sender": "contact", "content": "カフェが好きです"},
+        {"sender": "self", "content": "私もカフェが好きです"},
+        {"sender": "contact", "content": "友達が『一緒にカフェに行きたい』と言っていました"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "活動の関心に反応します。",
+            "evidence": [conversation[-1]["content"]],
+            "invite_example": None,
+        }
+    )
+
+    result = _parse_tapple_strategy_messages(raw, conversation)
+
+    assert result is not None
+    assert result.action != "invite"
+
+
+def test_shared_interest_invite_fallback_runs_after_retries(client, monkeypatch):
+    from app import database
+
+    raw = _raw_strategy(
+        {
+            "action": "continue",
+            "rationale": "会話を続けます。",
+            "evidence": ["最近はじめたところです。ボルダリングを体験してみたいです！"],
+            "invite_example": None,
+        },
+        replies=[
+            "ボルダリングいいですね！",
+            "楽しそうですね！",
+            "ボルダリングに興味あります！",
+        ],
+    )
+
+    class RepeatingProvider:
+        name = "gemini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **_kwargs):
+            self.calls += 1
+            return raw
+
+        def available_models(self):
+            return ["gemini-3.5-flash-lite"]
+
+    provider = RepeatingProvider()
+    monkeypatch.setattr("app.routers.generation.factory.get_provider", lambda *_args: provider)
+    monkeypatch.setattr(
+        "app.routers.generation.get_ai_config",
+        lambda: {
+            "provider": "gemini",
+            "model": "gemini-3.5-flash-lite",
+            "api_key": "test-key",
+            "temperature": 0.2,
+            "max_tokens": 512,
+            "history_limit": 50,
+            "fallback_provider": "gemini",
+            "fallback_model": "gemini-3.1-flash-lite",
+            "fallback_api_key": "test-key",
+            "secondary_api_key": "",
+        },
+    )
+    monkeypatch.setattr("app.routers.generation.time.sleep", lambda *_args: None)
+    database.set_setting("ai_provider", "gemini")
+    database.set_setting("ai_model", "gemini-3.5-flash-lite")
+    database.set_setting("api_key_gemini", "test-key")
+
+    contact_id = client.post("/api/contacts", json={"name": "共通の趣味"}).json()["id"]
+    client.post(
+        f"/api/contacts/{contact_id}/messages",
+        json={"sender": "contact", "content": "ボルダリングに興味があります"},
+    )
+    client.post(
+        f"/api/contacts/{contact_id}/messages",
+        json={"sender": "self", "content": "僕もボルダリングが好きです"},
+    )
+    client.post(
+        f"/api/contacts/{contact_id}/messages",
+        json={
+            "sender": "contact",
+            "content": "最近はじめたところです。ボルダリングを体験してみたいです！",
+        },
+    )
+
+    response = client.post(
+        "/api/generate",
+        json={"contact_id": contact_id, "candidates": 3, "strategy_mode": "tapple"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert provider.calls == 6
+    assert len(set(payload["replies"])) == 3
+    assert payload["strategy"]["action"] == "invite"
+    assert payload["strategy"]["invite_example"]
+
+
+def test_tapple_disliked_activity_interest_fallback_runs_after_retries(client, monkeypatch):
+    from app import database
+
+    raw = _raw_strategy(
+        {
+            "action": "wait",
+            "rationale": "相手の話題に反応します。",
+            "evidence": ["駅前のカフェに行ってみたいです"],
+            "invite_example": None,
+        },
+        replies=["カフェいいですね！"],
+    )
+
+    class RepeatingProvider:
+        name = "gemini"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, **_kwargs):
+            self.calls += 1
+            return raw
+
+        def available_models(self):
+            return ["gemini-3.5-flash-lite"]
+
+    provider = RepeatingProvider()
+    monkeypatch.setattr("app.routers.generation.factory.get_provider", lambda *_args: provider)
+    monkeypatch.setattr(
+        "app.routers.generation.get_ai_config",
+        lambda: {
+            "provider": "gemini",
+            "model": "gemini-3.5-flash-lite",
+            "api_key": "test-key",
+            "temperature": 0.2,
+            "max_tokens": 512,
+            "history_limit": 50,
+            "fallback_provider": "gemini",
+            "fallback_model": "gemini-3.1-flash-lite",
+            "fallback_api_key": "test-key",
+            "secondary_api_key": "",
+        },
+    )
+    monkeypatch.setattr("app.routers.generation.time.sleep", lambda *_args: None)
+    database.set_setting("ai_provider", "gemini")
+    database.set_setting("ai_model", "gemini-3.5-flash-lite")
+    database.set_setting("api_key_gemini", "test-key")
+
+    contact_id = client.post("/api/contacts", json={"name": "カフェの好み"}).json()["id"]
+    client.post(
+        f"/api/contacts/{contact_id}/messages",
+        json={"sender": "self", "content": "カフェはあまり好きではないです"},
+    )
+    client.post(
+        f"/api/contacts/{contact_id}/messages",
+        json={"sender": "contact", "content": "駅前のカフェに行ってみたいです"},
+    )
+
+    response = client.post(
+        "/api/generate",
+        json={"contact_id": contact_id, "candidates": 1, "strategy_mode": "tapple"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert provider.calls == 6
+    assert response.json()["replies"] == [
+        "カフェはあまり好きではないんですけど、どんなところが気になったんですか？"
+    ]
+
+
+@pytest.mark.parametrize(
+    "contact_message",
+    [
+        "駅前のカフェに行ってみたいです",
+        "友達が『今度一緒にカフェに行きたい』と言っていました",
+        "前に『今度一緒にカフェに行きたい』って言ってたよね",
+    ],
+)
+def test_tapple_disliked_activity_fallback_requires_a_direct_invitation(contact_message):
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": contact_message},
+    ]
+
+    assert _build_tapple_disliked_activity_decline_fallbacks(conversation, 3) is None
+
+
+def test_tapple_disliked_activity_does_not_require_decline_for_invitation_to_another_activity():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {
+            "sender": "contact",
+            "content": "カフェは苦手なんですね。今度一緒に映画に行きませんか？",
+        },
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画ならぜひ行きたいです。"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="invite",
+    )
+
+    assert not any("苦手な活動への誘い" in violation for violation in violations)
+    assert _build_tapple_disliked_activity_decline_fallbacks(conversation, 3) is None
+
+
+def test_wait_reply_can_endorse_a_different_activity_near_disinterest_mention():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["カフェは苦手、映画楽しそう！"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert not any("苦手意識" in violation for violation in violations)
+
+
+def test_wait_reply_rejects_later_endorsement_of_disliked_activity():
+    conversation = [
+        {"sender": "self", "content": "カフェは苦手です。映画は好きです"},
+        {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["映画もいいですね。少し話は変わるけど、カフェ巡り楽しそう！"],
+        expected_candidates=1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert any("苦手意識" in violation for violation in violations)
 
 
 def test_tapple_benchmark_requires_wait_after_engagement_declines():
@@ -1757,6 +3188,30 @@ def test_scheduling_after_explicit_acceptance_is_allowed():
     assert not any("誘い" in violation for violation in violations)
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "都合の良い日ありますか？",
+        "いつの週末が空いてますか？",
+        "何曜日や時間帯が都合よさそうですか？",
+    ],
+)
+def test_explicit_availability_question_counts_as_post_acceptance_scheduling(reply):
+    violations = validate_candidate_replies(
+        [reply],
+        1,
+        counterpart_message="ぜひ一緒に行きたいです！",
+        strategy_mode="tapple",
+        tapple_action="continue",
+        conversation_messages=[
+            {"sender": "self", "content": "今度カフェに一緒に行きませんか？"},
+            {"sender": "contact", "content": "ぜひ一緒に行きたいです！"},
+        ],
+    )
+
+    assert not any("日程調整へ進んでいません" in violation for violation in violations)
+
+
 def test_general_activity_interest_without_a_prior_invitation_does_not_allow_scheduling():
     violations = validate_candidate_replies(
         ["来週カフェに行きませんか？"],
@@ -2024,6 +3479,7 @@ def test_both_suggested_dates_unavailable_do_not_authorize_scheduling():
         "家寄っていかない？",
         "宅飲みしようよ。",
         "カフェの後は家でどう？",
+        "近いうちにおうちで会いましょう。",
     ],
 )
 def test_tapple_reply_cannot_suggest_a_private_place(reply):
@@ -2144,6 +3600,18 @@ def test_tapple_allows_rejecting_home_meeting_and_suggesting_public_cafe():
 
 @pytest.mark.parametrize("reply", ["家に来ないでください。", "家に来ないでね。"])
 def test_tapple_does_not_treat_negative_come_over_requests_as_proposals(reply):
+    assert not _is_tapple_private_place_proposal(reply)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "近いうちに予定を合わせて行きましょうか。",
+        "早いうちに予定を合わせて行きましょうか。",
+        "そのうち予定を合わせて行きましょうか。",
+    ],
+)
+def test_tapple_does_not_treat_temporal_uchi_as_a_private_place(reply):
     assert not _is_tapple_private_place_proposal(reply)
 
 
@@ -5100,6 +6568,448 @@ def test_tapple_prompt_requires_strategy_and_action_consistent_replies():
     assert "店の雰囲気を知っているように述べず" in instruction
     assert "一人で行くよう勧めたり" in instruction
     assert "既知の関心を一度だけ共有" in instruction
+    assert "直前の本人の発言を言い換えただけ" in instruction
+
+
+def test_tapple_prompt_distinguishes_contact_availability_and_already_acknowledged_declines():
+    messages = prompt.build_initial_generation_messages(
+        system_prompt="system",
+        chat_history_text=(
+            "自分: 土曜日に駅前のカフェに行きませんか？\n"
+            "相手: 土曜は難しいですが、日曜なら大丈夫です！"
+        ),
+        strategy_mode="tapple",
+    )
+    instruction = messages[1]["content"]
+    repair_instruction = _repair_tapple_output_instruction(3, "continue")
+    stop_repair_instruction = _repair_tapple_output_instruction(3, "stop")
+
+    assert "相手が示した代替日の都合は相手側の空きだけ" in instruction
+    assert "相手が示した代替日の都合は相手側の空きだけ" in repair_instruction
+    assert "相手の予定を再確認しないでください" in instruction
+    assert "相手の予定を再確認しないでください" in repair_instruction
+    assert "本人がすでに断りを受け止めて相手も短く同意している場合" in instruction
+    assert "本人がすでに断りを受け止めて相手も短く同意している場合" in stop_repair_instruction
+    assert "直近の相づちを返信の冒頭で繰り返さず" in instruction
+    assert "直近の相づちを返信の冒頭で繰り返さず" in stop_repair_instruction
+    assert "最新の相手発言から完全一致の短い抜粋" in instruction
+    assert "最新の相手発言から完全一致の短い抜粋" in repair_instruction
+
+
+def test_tapple_decline_strategy_evidence_uses_latest_acknowledgment():
+    conversation = [
+        {"sender": "contact", "content": "ごめんなさい、今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "wait",
+            "rationale": "以前の断りを受け止めた後の短い同意なので、ここで会話を閉じます。",
+            "evidence": ["そうですね"],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+    fallback = _build_safe_tapple_fallback_strategy(conversation)
+
+    assert parsed is not None
+    assert parsed.action == "stop"
+    assert parsed.evidence == ["そうですね"]
+    assert fallback is not None
+    assert fallback.action == "stop"
+    assert fallback.evidence == ["そうですね"]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "日曜なら都合がつきます！",
+        "日曜日は空いていますよ！",
+        "日曜なら行けそうです！",
+    ],
+)
+def test_tapple_counterproposal_rejects_unconfirmed_self_availability(reply):
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert any("本人の空き状況" in violation for violation in violations)
+
+
+def test_tapple_counterproposal_allows_checking_self_availability_and_grounded_confirmation():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+    checking_reply = validate_candidate_replies(
+        [
+            "日曜なら、私も予定を確認してみますね",
+            "日曜なら都合がつくか予定を確認して、あとで連絡しますね",
+            "日曜なら大丈夫ですか？",
+            "日曜なら自分の予定も確認してみますね",
+        ],
+        4,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+    grounded_conversation = [
+        conversation[0],
+        {
+            "sender": "self",
+            "content": "土曜日に駅前のカフェに行きませんか？日曜日なら空いています。",
+        },
+        conversation[-1],
+    ]
+    grounded_reply = validate_candidate_replies(
+        ["日曜日なら大丈夫です！"],
+        1,
+        counterpart_message=grounded_conversation[-1]["content"],
+        conversation_messages=grounded_conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert not any("本人の空き状況" in violation for violation in checking_reply)
+    assert not any("相手がすでに示した代替日の都合" in violation for violation in checking_reply)
+    assert not any("本人の空き状況" in violation for violation in grounded_reply)
+
+
+def test_tapple_counterproposal_does_not_recheck_contact_availability():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["日曜ですね、そっちの予定も確認してみます！"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert any("相手がすでに示した代替日の都合" in violation for violation in violations)
+
+
+def test_tapple_counterproposal_does_not_treat_self_availability_question_as_a_fact():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {
+            "sender": "self",
+            "content": "土曜日に駅前のカフェに行きませんか？日曜日は空いていますか？",
+        },
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["日曜なら私も空いています"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert any("本人の空き状況" in violation for violation in violations)
+
+
+def test_tapple_counterproposal_does_not_treat_reflected_contact_availability_as_self_availability():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+        {"sender": "self", "content": "日曜なら大丈夫なんですね！"},
+        {"sender": "contact", "content": "はい、土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["日曜なら大丈夫です"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert any("本人の空き状況" in violation for violation in violations)
+
+
+def test_tapple_counterproposal_keeps_self_availability_after_reflection_as_known():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+        {"sender": "self", "content": "日曜なら大丈夫なんですね！でも自分も日曜は空いています"},
+        {"sender": "contact", "content": "はい、土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["日曜なら大丈夫です"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert not any("本人の空き状況" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "日曜なら大丈夫ですよね？",
+        "日曜なら行けますよね？",
+        "日曜なら空いてるんですね？",
+        "日曜なら都合がつくんですね？",
+        "日曜なら空いてるんですか",
+        "日曜なら行けるんですか",
+        "日曜なら空いてるんだね！",
+        "日曜なら空いてるってことですね！",
+        "日曜なら空いてるんだね、ありがとう",
+        "日曜なら空いてるよね",
+        "日曜なら空いてるかな",
+    ],
+)
+def test_tapple_counterproposal_does_not_treat_question_or_reflection_as_self_availability(reply):
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert not any("本人の空き状況" in violation for violation in violations)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "日曜ならいけますね！ちょっと予定確認します！",
+        "日曜大丈夫です！自分の予定も見てみますね！",
+        "日曜なら大丈夫なんですね！でも私は空いてるよ",
+        "日曜なら空いてるんですか？私は空いてます",
+    ],
+)
+def test_tapple_counterproposal_rejects_claiming_availability_before_checking(reply):
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    violations = validate_candidate_replies(
+        [reply],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert any("本人の空き状況" in violation for violation in violations)
+
+
+def test_tapple_counterproposal_schedule_fallback_is_grounded_and_hard_validated():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+
+    replies = _build_tapple_counterproposal_schedule_check_fallbacks(
+        conversation, 3
+    )
+    violations = validate_candidate_replies(
+        replies or [],
+        3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="continue",
+    )
+
+    assert replies is not None
+    assert len(replies) == 3
+    assert all("日曜" in reply for reply in replies)
+    assert not any("空いています" in reply or "行けます" in reply for reply in replies)
+    assert not violations
+
+
+def test_tapple_rejects_ack_only_reply_after_decline_was_already_acknowledged():
+    conversation = [
+        {"sender": "contact", "content": "カフェ好きです"},
+        {"sender": "self", "content": "今度、駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "ごめんなさい、今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+    ack_only_violations = validate_candidate_replies(
+        [
+            "ですね！",
+            "そうですね",
+            "そうですね笑",
+            "そうですね、気持ちを話してくれてありがとう！",
+            "わかりました！",
+        ],
+        5,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+    contextual_closings = validate_candidate_replies(
+        [
+            "気持ちを伝えてくれてありがとう！",
+            "大丈夫だよ、正直に話してくれてありがとう",
+            "気にしないでね。話してくれてありがとう！",
+        ],
+        3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+
+    assert sum("冒頭で繰り返しています" in violation for violation in ack_only_violations) == 5
+    assert not contextual_closings
+
+
+def test_tapple_rejects_future_recontact_after_acknowledged_decline():
+    conversation = [
+        {"sender": "contact", "content": "カフェ好きです"},
+        {"sender": "self", "content": "今度、駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "ごめんなさい、今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["またタイミングが合えばよろしくお願いします。"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+
+    assert any("将来の再連絡・誘い" in violation for violation in violations)
+
+
+def test_tapple_rejects_repeating_the_already_acknowledged_boundary():
+    conversation = [
+        {"sender": "contact", "content": "今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["無理に誘ったりしないので安心してくださいね。"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+
+    assert any("直前の『誘わない』" in violation for violation in violations)
+
+
+def test_tapple_does_not_treat_a_character_overlap_as_acknowledgment_echo():
+    conversation = [
+        {"sender": "contact", "content": "今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうか"},
+    ]
+
+    violations = validate_candidate_replies(
+        ["かえって話してくれてありがとう。無理はしないよ。"],
+        1,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+
+    assert not any("冒頭で繰り返しています" in violation for violation in violations)
+
+
+def test_tapple_acknowledged_decline_fallbacks_are_grounded_and_hard_validated():
+    conversation = [
+        {"sender": "contact", "content": "カフェ好きです"},
+        {"sender": "self", "content": "今度、駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "ごめんなさい、今は会うのは難しいです。"},
+        {"sender": "self", "content": "わかりました。無理に誘いません。"},
+        {"sender": "contact", "content": "そうですね"},
+    ]
+
+    replies = _build_tapple_acknowledged_decline_closing_fallbacks(conversation, 3)
+    violations = validate_candidate_replies(
+        replies or [],
+        3,
+        counterpart_message=conversation[-1]["content"],
+        conversation_messages=conversation,
+        strategy_mode="tapple",
+        tapple_action="stop",
+    )
+
+    assert replies is not None
+    assert len(replies) == 3
+    assert all("そうですね" not in reply for reply in replies)
+    assert len(set(replies)) == 3
+    assert not violations
+
+
+def test_tapple_strategy_treats_a_safe_date_counterproposal_as_continue():
+    conversation = [
+        {"sender": "contact", "content": "カフェ行きたいです"},
+        {"sender": "self", "content": "土曜日に駅前のカフェに行きませんか？"},
+        {"sender": "contact", "content": "土曜は難しいですが、日曜なら大丈夫です！"},
+    ]
+    raw = _raw_strategy(
+        {
+            "action": "wait",
+            "rationale": "相手が代替日を出しているため、日程を調整します。",
+            "evidence": ["土曜は難しいですが、日曜なら大丈夫です！"],
+            "invite_example": None,
+        }
+    )
+
+    parsed = _parse_tapple_strategy_messages(raw, conversation)
+    fallback = _build_safe_tapple_fallback_strategy(conversation)
+
+    assert parsed is not None
+    assert parsed.action == "continue"
+    assert parsed.evidence == [conversation[-1]["content"]]
+    assert fallback is not None
+    assert fallback.action == "continue"
+    assert fallback.evidence == [conversation[-1]["content"]]
 
 
 def test_accepted_invitation_replies_advance_to_logistics_without_reinviting():
@@ -5119,6 +7029,7 @@ def test_accepted_invitation_replies_advance_to_logistics_without_reinviting():
     advanced = validate_candidate_replies(
         [
             "うれしい！いつ頃が都合よさそう？",
+            "ぜひ行きましょう！最近はいつあたりが空いてますか？",
             "いいね！日程はまた相談しよう",
             "楽しみ！予定合わせていこうね",
         ],

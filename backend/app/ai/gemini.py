@@ -26,6 +26,8 @@ MIN_MAX_TOKENS = 2048
 QUOTA_FALLBACK_MODELS = frozenset(
     {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"}
 )
+TRANSIENT_RETRYABLE_STATUS_CODES = frozenset({500, 502, 503, 504})
+TRANSIENT_RETRY_BASE_DELAY = 1.0
 
 
 class GeminiProvider(AIProvider):
@@ -116,6 +118,20 @@ class GeminiProvider(AIProvider):
             body_text = resp.text or ""
             # Response bodies may include prompts, personal messages, or generated replies.
             logger.info("Gemini API response: status=%d", resp.status_code)
+
+            if (
+                resp.status_code in TRANSIENT_RETRYABLE_STATUS_CODES
+                and attempt < self.MAX_RETRIES - 1
+            ):
+                delay = TRANSIENT_RETRY_BASE_DELAY * (2**attempt)
+                logger.info(
+                    "Transient Gemini error, retrying in %.1f s (attempt %d/%d)",
+                    delay,
+                    attempt + 1,
+                    self.MAX_RETRIES,
+                )
+                time.sleep(delay)
+                continue
 
             try:
                 return self._parse_response(resp, body_text)

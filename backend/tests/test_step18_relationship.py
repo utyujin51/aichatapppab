@@ -2225,13 +2225,19 @@ def test_generation_prompt_does_not_force_one_sentence_for_tiredness_with_contac
     assert contact_summary in messages[0]["content"]
     assert contact_summary not in messages[-1]["content"]
     user_instruction = messages[-1]["content"]
+    full_prompt = "\n".join(message["content"] for message in messages)
 
     assert "一文だけ返してください" not in user_instruction
     assert "確認できる内容が少ない場合も、架空の内容や無関係な質問・自己開示で水増しせず" in user_instruction
     assert "確認できる内容が少ない場合は、質問や自己開示を無理に足さず短く返してください" not in user_instruction
     assert "Goldの文量は目安であり、内容への適切な返答を優先" in user_instruction
-    assert "原因や勤務状況を推測したり" in user_instruction
-    assert "労いや共感を毎回の書き出しにせず" in user_instruction
+    assert "原因や勤務状況、忙しさの期間" in user_instruction
+    assert "Goldに笑い表現が多くても" in user_instruction
+    assert "休息や気分転換を定型的に勧めず" in user_instruction
+    assert "眠い相手に毎案「ゆっくり休んで」と勧める" in user_instruction
+    assert "1案の中で「お疲れ様」を重ねず" in user_instruction
+    assert "3案すべてを労いから始めない" in user_instruction
+    assert "長めの出来事は全経過を要約・講評せず" in full_prompt
 
 
 def test_contact_style_soft_repair_and_ranking_use_recency_blended_gold(monkeypatch):

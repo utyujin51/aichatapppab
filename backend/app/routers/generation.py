@@ -611,6 +611,63 @@ _TAPPLE_ACTIVITY_INTEREST_RE = re.compile(
     r"気になって(?:います|ます|る)(?:ね|！|。|$)|"
     r"興味が(?:あります|ある)(?:ね|！|。|$)|また行きたい(?:です|！|。|$))"
 )
+_TAPPLE_SOLO_REFERENCE_RE = re.compile(r"(?:一人|ひとり|独り)(?:で|きりで)")
+_TAPPLE_SOLO_ACTIVITY_INTENT_RE = re.compile(
+    r"(?:行ってみたい|行きたい|行く予定|体験したい|楽しみたい|訪れたい)"
+)
+_TAPPLE_SOLO_INTENT_NEGATION_RE = re.compile(
+    r"^\s*(?:のではなく(?:て)?|(?:って)?わけではなく(?:て)?|(?:って)?わけじゃなく(?:て)?|"
+    r"(?:ん)?じゃなく(?:て)?|(?:ん)?じゃない(?:です)?|"
+    r"(?:って)?わけではない|(?:って)?わけじゃない|とは限らない|"
+    r"とは言っていない|とは言えない|とは思わない|(?:は|が)?(?:ない|ありません))"
+)
+
+
+def _has_explicit_solo_activity_preference(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text or "")
+    for solo_reference in _TAPPLE_SOLO_REFERENCE_RE.finditer(normalized):
+        clause_end = min(
+            (
+                position
+                for mark in ("。", "！", "!", "？", "?", "\n")
+                if (position := normalized.find(mark, solo_reference.end())) >= 0
+            ),
+            default=len(normalized),
+        )
+        intent = _TAPPLE_SOLO_ACTIVITY_INTENT_RE.search(
+            normalized, solo_reference.end(), clause_end
+        )
+        if intent and not _TAPPLE_SOLO_INTENT_NEGATION_RE.match(
+            normalized[intent.end() : clause_end]
+        ):
+            return True
+    return False
+
+
+_TAPPLE_ACTIVITY_ENDORSEMENT_RE = re.compile(
+    r"(?:楽しそう(?:だと思います(?:よね|ね|よ)?|だと思う(?:よね|よ|ね)?)(?=$|[。！!、,\s])|"
+    r"楽しそう(?:です(?:よね|ね|よ)?|ですね|だよね|だよ|だね|よね|よ|ね)(?=$|[。！!、,\s])|楽しそう(?:！|。|$)|"
+    r"面白そう(?:だと思います(?:よね|ね|よ)?|だと思う(?:よね|よ|ね)?)(?=$|[。！!、,\s])|"
+    r"面白そう(?:です(?:よね|ね|よ)?|ですね|だよね|だよ|だね|よね|よ|ね)(?=$|[。！!、,\s])|面白そう(?:！|。|$)|"
+    r"いい(?:です(?:よね|ね|よ)?|ですね|ですよね|よね|よ|だね|と思います(?:よね|ね|よ)?|と思う(?:よね|よ|ね|です)?)(?=$|[。！!、,\s])|いい(?:！|。|$)|"
+    r"良さそう(?:です(?:よね|ね|よ)?|ですね|ですよね|だよね|だよ|だね|よね|よ|ね)(?=$|[。！!、,\s])|良さそう(?:！|。|$)|"
+    r"行きやすい(?:です(?:よね|ね|よ)?|よね|ね|よ|！|。|$)(?=$|[。！!、,\s])|"
+    r"行きやすそう(?:です(?:よね|ね|よ)?|ですね|だよね|だよ|だね|よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"寄りやすい(?:です(?:よね|ね|よ)?|よね|ね|よ|！|。|$)(?=$|[。！!、,\s])|"
+    r"寄りやすそう(?:です(?:よね|ね|よ)?|ですね|だよね|だよ|だね|よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"ありそう(?:です(?:よね|ね|よ)?|だよね|だよ|だね|よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"気になります(?:よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"気になって(?:います|いる|ます|る)(?:んだよね|んだよ|んです(?:よね|ね|よ)?|よね|よ|ね|んだ|んですね|かも|！|。|$)(?=$|[。！!、,\s])|"
+    r"気になる(?:んだよね|んだよ|んです(?:よね|ね|よ)?|よね|よ|かも|ね|な|んだ|んですね|です(?:ね)?|！|。|$)(?=$|[。！!、,\s])|"
+    r"興味(?:が)?あります(?:よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"興味(?:が)?ある(?:んだよね|んだよ|んです(?:よね|ね|よ)?|んだ|よね|よ|ね|かも|！|。|$)(?=$|[。！!、,\s])|"
+    r"好き(?:です(?:よね|よ|ね|！|。|$)|だよね|だよ|だね|よね|よ|ね|！|。|$)(?=$|[。！!、,\s])|"
+    r"行けたらいい(?:ですね|ですよね|ね|よね|な)(?=$|[。！!、,\s])|行けたらいい(?:！|。|$)|"
+    r"行けたら嬉しい(?:です(?:よね|ね|よ)?|よね|よ|ね|な)(?=$|[。！!、,\s])|行けたら嬉しい(?:！|。|$)|"
+    r"行ってみたい(?:んだよね|んだよ|んだ|んです(?:よね|ね|よ)?|です(?:よね|ね|よ)?|よね|よ|ね|な)(?=$|[。！!、,\s])|行ってみたい(?:！|。|$)|"
+    r"行きたい(?:んだよね|んだよ|んだ|んです(?:よね|ね|よ)?|です(?:よね|ね|よ)?|よね|よ|ね|な)(?=$|[。！!、,\s])|行きたい(?:！|。|$)|"
+    r"一緒に行こう(?:よ|ね)(?=$|[。！!、,\s])|一緒に行こう(?:！|。|$))"
+)
 _TAPPLE_SHARED_ACTIVITY_TERMS = (
     "カフェ", "喫茶", "コーヒー", "紅茶", "パンケーキ", "スイーツ", "ケーキ",
     "ランチ", "ディナー", "ごはん", "食事", "焼肉", "ラーメン", "映画", "ミステリー",
@@ -673,6 +730,83 @@ _TAPPLE_RENEWED_ACTIVITY_POSITIVE_RE = re.compile(
     r"行きたい|行ってみたい|食べてみたい|見てみたい|試してみたい|"
     r"体験してみたい|気になって(?:います|ます|る)|興味が(?:あります|ある))"
 )
+_TAPPLE_QUALIFIED_NEGATIVE_RENEWAL_RE = re.compile(
+    r"(?:(?:という|って|な)?(?:わけ|ほど)?)(?:では|じゃ)"
+    r"(?:ありません|ない(?!わけ|こと))|"
+    r"とは(?:言え|いえ)(?:ません|ない)|"
+    r"とは限(?:らない|りません)|とはかぎら(?:ない|りません)|"
+    r"でも(?:ありません|ない(?!わけ|こと))"
+)
+
+
+def _is_negated_tapple_renewal(text: str, match: re.Match[str]) -> bool:
+    following_text = text[match.end() :]
+    return bool(
+        _TAPPLE_ACTIVITY_DISINTEREST_RE.match(following_text)
+        or _TAPPLE_QUALIFIED_NEGATIVE_RENEWAL_RE.match(following_text)
+    )
+
+
+def _current_tapple_positive_activity_terms(text: str) -> set[str]:
+    intent_patterns = (
+        _TAPPLE_INVITE_POSITIVE_RE,
+        _TAPPLE_ACTIVITY_INTEREST_RE,
+        _TAPPLE_RENEWED_ACTIVITY_POSITIVE_RE,
+    )
+    activity_terms: set[str] = set()
+    for pattern in intent_patterns:
+        for intent_match in pattern.finditer(text):
+            sentence_start = max(
+                (text.rfind(marker, 0, intent_match.start()) for marker in "。！？!?\n"),
+                default=-1,
+            )
+            window_start = max(sentence_start + 1, intent_match.start() - 48)
+            window = text[window_start : intent_match.end()]
+            term_positions = []
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS:
+                for match in re.finditer(re.escape(term), window):
+                    absolute_term_end = window_start + match.end()
+                    if _TAPPLE_ACTIVITY_DISINTEREST_RE.match(text[absolute_term_end:]):
+                        continue
+                    term_positions.append((match.start(), term))
+            if term_positions:
+                activity_terms.add(max(term_positions)[1])
+    return activity_terms
+
+
+def _tapple_current_activity_candidates(text: str) -> set[str]:
+    """Return specific activity names grounded in the latest positive interest clause."""
+    current_terms = _current_tapple_positive_activity_terms(text)
+    if current_terms:
+        return current_terms
+    return _extract_tapple_interest_terms(text)
+
+
+def _tapple_activity_matches_current_interest(
+    activity: str, current_terms: set[str]
+) -> bool:
+    return any(
+        activity == current or activity in current or current in activity
+        for current in current_terms
+    )
+
+
+def _tapple_endorsed_activity_terms(text: str) -> set[str]:
+    endorsed_terms: set[str] = set()
+    for endorsement_match in _TAPPLE_ACTIVITY_ENDORSEMENT_RE.finditer(text):
+        sentence_start = max(
+            (text.rfind(marker, 0, endorsement_match.start()) for marker in "。！？!?\n"),
+            default=-1,
+        ) + 1
+        preceding_text = text[sentence_start : endorsement_match.start()]
+        activity_matches = [
+            (match.end(), len(term), term)
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            for match in re.finditer(re.escape(term), preceding_text)
+        ]
+        if activity_matches:
+            endorsed_terms.add(max(activity_matches)[2])
+    return endorsed_terms
 
 
 def _has_recent_self_disinterest_in_tapple_activity(
@@ -692,6 +826,20 @@ def _has_recent_self_disinterest_in_tapple_activity(
     )
     is_disinterested = False
     for self_text in self_texts:
+        if is_disinterested and activity_term not in self_text:
+            renewal_match = renewed_interest_re.search(self_text)
+            renewal_context = self_text[: renewal_match.end()] if renewal_match else ""
+            other_terms = (
+                set(_TAPPLE_SHARED_ACTIVITY_TERMS)
+                | _extract_tapple_interest_terms(renewal_context)
+            ) - {activity_term}
+            if (
+                renewal_match
+                and re.search(r"(?:でも|ただ|けど|今は|今でも|現在は)", renewal_context)
+                and not _is_negated_tapple_renewal(self_text, renewal_match)
+                and not any(term in renewal_context for term in other_terms)
+            ):
+                is_disinterested = False
         events: list[tuple[int, bool]] = []
         for clause_match in re.finditer(r"[^。！？!?\n]+", self_text):
             clause = clause_match.group(0)
@@ -722,9 +870,8 @@ def _has_recent_self_disinterest_in_tapple_activity(
                             set(_TAPPLE_SHARED_ACTIVITY_TERMS)
                             | _extract_tapple_interest_terms(renewal_context)
                         ) - {activity_term}
-                        renewal_tail = later_text[renewal_match.end() :]
-                        renewal_is_negative = bool(
-                            _TAPPLE_ACTIVITY_DISINTEREST_RE.match(renewal_tail)
+                        renewal_is_negative = _is_negated_tapple_renewal(
+                            later_text, renewal_match
                         )
                         if not renewal_is_negative and not any(
                             term in renewal_context for term in other_terms
@@ -1410,6 +1557,42 @@ def _has_explicit_tapple_invitation(reply: str) -> bool:
     return False
 
 
+def _tapple_invited_activity_terms(text: str) -> set[str]:
+    """Return activity terms tied to a direct invitation in the same sentence."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    quotes = list(re.finditer(r"「[^」]*」|『[^』]*』", normalized))
+    third_party = list(_TAPPLE_THIRD_PARTY_INTEREST_RE.finditer(normalized))
+    reported_quotes = list(_TAPPLE_REPORTED_THIRD_PARTY_QUOTE_RE.finditer(normalized))
+    invited_terms: set[str] = set()
+    invitation_intents = sorted(
+        [
+            *_TAPPLE_INVITATION_ACTION_RE.finditer(normalized),
+            *_TAPPLE_INVITE_POSITIVE_RE.finditer(normalized),
+        ],
+        key=lambda match: (match.start(), match.end()),
+    )
+    for action in invitation_intents:
+        if any(span.start() <= action.start() < span.end() for span in quotes):
+            continue
+        if any(span.start() <= action.start() < span.end() for span in third_party):
+            continue
+        if any(span.start() <= action.start() < span.end() for span in reported_quotes):
+            continue
+        sentence_start = max(
+            (normalized.rfind(marker, 0, action.start()) for marker in "。.!！?？\n"),
+            default=-1,
+        ) + 1
+        invitation_context = normalized[sentence_start : action.end()]
+        activity_matches = [
+            (match.end(), len(term), term)
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            for match in re.finditer(re.escape(term), invitation_context)
+        ]
+        if activity_matches:
+            invited_terms.add(max(activity_matches)[2])
+    return invited_terms
+
+
 def _tapple_invitation_targets_activity(
     reply: str,
     counterpart_message: str,
@@ -1695,7 +1878,11 @@ def _tapple_invitation_targets_activity(
                 latest_target = max(candidate_occurrences)[1]
                 if latest_target in disinterested_activity_terms:
                     return False
-                if any(term in latest_target for term in activity_terms):
+                if any(
+                    term in latest_target
+                    or _TAPPLE_AUTO_INVITE_VENUES.get(term) == latest_target
+                    for term in activity_terms
+                ):
                     continue
                 if not (
                     index > 0
@@ -1788,7 +1975,7 @@ _TAPPLE_SCHEDULING_PROPOSAL_RE = re.compile(
 _TAPPLE_SCHEDULING_NEXT_STEP_RE = re.compile(
     r"(?:いつ(?:頃|ごろ)?|何曜日|何日|何時|日程).{0,16}"
     r"(?:都合|空いて|予定|教えて|聞かせて|合わせ|決め|相談|よさそう|良さそう|いいですか|どうですか)"
-    r"|(?:都合|予定|日程).{0,12}(?:教えて|聞かせて|どう|よさそう|良さそう|合わせ|決め|相談|空いて)"
+    r"|(?:都合|予定|日程).{0,12}(?:教えて|聞かせて|どう|よさそう|良さそう|合わせ|決め|相談|空いて|ありますか)"
     r"|(?:平日|週末|土曜(?:日)?|日曜(?:日)?).{0,12}(?:都合|予定|空いて|どう|合わせ|いい|よさそう|良さそう)"
 )
 
@@ -1826,7 +2013,38 @@ def _has_prior_self_tapple_invitation(
     )
 
 
-_TAPPLE_PUBLIC_PLACE_RE = re.compile(r"(?:カフェ|喫茶店|レストラン|飲食店|ホテルのロビー|ボルダリングジム|スポーツジム|スポーツ施設|体育館|ボウリング場|公共の場所|人通りのある場所|人の多い場所|商業施設|フードコート|駅前|公園)")
+_TAPPLE_PUBLIC_PLACE_RE = re.compile(
+    r"(?:カフェ|喫茶店|レストラン|飲食店|ホテルのロビー|ボルダリングジム|"
+    r"スポーツジム|スポーツ施設|体育館|ボウリング場|公共の場所|人通りのある場所|"
+    r"人の多い場所|商業施設|フードコート|駅前|公園|映画館|美術館|博物館|"
+    r"水族館|動物園|遊園地|ライブ会場|野球場)"
+)
+_TAPPLE_AUTO_INVITE_VENUES = {
+    "ボルダリング": "ボルダリングジム",
+    "カフェ": "カフェ",
+    "喫茶": "喫茶店",
+    "コーヒー": "カフェ",
+    "紅茶": "カフェ",
+    "パンケーキ": "カフェ",
+    "スイーツ": "カフェ",
+    "ケーキ": "カフェ",
+    "ランチ": "レストラン",
+    "ディナー": "レストラン",
+    "ごはん": "レストラン",
+    "食事": "レストラン",
+    "焼肉": "レストラン",
+    "ラーメン": "飲食店",
+    "映画": "映画館",
+    "美術館": "美術館",
+    "博物館": "博物館",
+    "水族館": "水族館",
+    "動物園": "動物園",
+    "遊園地": "遊園地",
+    "野球": "野球場",
+    "スポーツ": "スポーツ施設",
+    "公園": "公園",
+    "散歩": "公園",
+}
 _TAPPLE_PRIVATE_PLACE_RE = re.compile(
     r"(?:自宅|お?うち(?:で|に|へ|集合|待ち合わせ|飲み)|お?家(?:で|に|へ|集合|待ち合わせ|飲み)|ホテル|客室|個室|スイートルーム|スイート|ルーム)"
 )
@@ -1855,6 +2073,7 @@ _TAPPLE_SAFE_PRIVATE_REFERENCE_RE = re.compile(
     r"(?:カフェ|喫茶店|レストラン|飲食店)|"
     r"ホテルの(?:カフェ|喫茶店|レストラン|飲食店|ロビー|フロント|エントランス|ラウンジ|バー)"
 )
+_TAPPLE_NON_PRIVATE_RELATIVE_TIME_RE = re.compile(r"(?:近いうち|早いうち|そのうち)(?:に|まで|は)?")
 _TAPPLE_PRIVATE_PLACE_PROPOSAL_RE = re.compile(
     r"(?:自宅|部屋|お?うち|お?家(?!族|事)|家(?!族|事)|ホテル|客室|個室|スイートルーム|スイート|ルーム)(?:に|で|へ)?"
     r"(?:泊まりませんか|泊まりましょう|泊まろう|泊まりたい|泊まってください|"
@@ -1919,10 +2138,333 @@ def _is_tapple_contact_exchange_request(text: str) -> bool:
 
 def _is_tapple_private_place_proposal(text: str) -> bool:
     text_without_negated_mentions = _TAPPLE_NEGATED_PRIVATE_PLACE_RE.sub(" ", text)
-    text_without_contextual_public_places = _TAPPLE_SAFE_PRIVATE_REFERENCE_RE.sub(
+    text_without_temporal_uchi = _TAPPLE_NON_PRIVATE_RELATIVE_TIME_RE.sub(
         " ", text_without_negated_mentions
     )
+    text_without_contextual_public_places = _TAPPLE_SAFE_PRIVATE_REFERENCE_RE.sub(
+        " ", text_without_temporal_uchi
+    )
     return bool(_TAPPLE_PRIVATE_PLACE_PROPOSAL_RE.search(text_without_contextual_public_places))
+
+
+def _build_tapple_shared_interest_invite_example(
+    conversation_messages: list[dict[str, Any]],
+    last_contact_index: int,
+    last_contact: str,
+) -> str | None:
+    prior_self_texts = [
+        prompt.clean_chat_message_content(str(message.get("content") or ""))
+        for message in conversation_messages[:last_contact_index]
+        if message.get("sender") == "self"
+    ]
+    current_terms = _tapple_current_activity_candidates(last_contact)
+    shared_terms = sorted(
+        (
+            term
+            for term in (
+                set(_TAPPLE_SHARED_ACTIVITY_TERMS)
+                | _extract_tapple_interest_terms(last_contact)
+            )
+            if term in _TAPPLE_AUTO_INVITE_VENUES
+            and term in last_contact
+            and _tapple_activity_matches_current_interest(term, current_terms)
+            and any(term in self_text for self_text in prior_self_texts)
+            and not _has_recent_self_disinterest_in_tapple_activity(
+                conversation_messages, last_contact_index, term
+            )
+        ),
+        key=len,
+        reverse=True,
+    )
+    for term in shared_terms:
+        venue = _TAPPLE_AUTO_INVITE_VENUES[term]
+        example = f"よかったら今度、{venue}に一緒に行ってみませんか？"
+        if _is_tapple_invitation_example_safe(example):
+            return example
+    return None
+
+
+def _build_tapple_shared_interest_invite_fallback(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> tuple[list[str], TappleStrategy] | None:
+    if expected_candidates not in {1, 2, 3}:
+        return None
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0:
+        return None
+
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    if (
+        not _TAPPLE_ACTIVITY_INTEREST_RE.search(last_contact)
+        or _TAPPLE_THIRD_PARTY_INTEREST_RE.search(last_contact)
+        or _TAPPLE_REPORTED_THIRD_PARTY_QUOTE_RE.search(last_contact)
+        or _has_explicit_solo_activity_preference(last_contact)
+        or _tapple_invited_activity_terms(last_contact)
+        or _unresolved_tapple_decline_match(
+            conversation_messages, last_contact_index
+        )
+        or _has_tapple_explicit_hesitation(last_contact)
+        or _has_unresolved_tapple_safety_or_hesitation(
+            conversation_messages, last_contact_index
+        )
+        or not _has_recent_shared_tapple_activity(
+            conversation_messages, last_contact_index, last_contact
+        )
+    ):
+        return None
+
+    current_terms = _tapple_current_activity_candidates(last_contact)
+    activity = next(
+        (
+            term
+            for term in sorted(
+                set(_TAPPLE_SHARED_ACTIVITY_TERMS)
+                | _extract_tapple_interest_terms(last_contact),
+                key=len,
+                reverse=True,
+            )
+            if term in _TAPPLE_AUTO_INVITE_VENUES
+            and term in last_contact
+            and _tapple_activity_matches_current_interest(term, current_terms)
+            and any(
+                term
+                in prompt.clean_chat_message_content(str(message.get("content") or ""))
+                for message in conversation_messages[:last_contact_index]
+                if message.get("sender") == "self"
+            )
+            and not _has_recent_self_disinterest_in_tapple_activity(
+                conversation_messages, last_contact_index, term
+            )
+        ),
+        None,
+    )
+    invite_example = _build_tapple_shared_interest_invite_example(
+        conversation_messages, last_contact_index, last_contact
+    )
+    if activity is None or invite_example is None:
+        return None
+
+    venue = _TAPPLE_AUTO_INVITE_VENUES[activity]
+    subject = f"{activity}のお店" if activity in {
+        "パンケーキ", "ケーキ", "スイーツ", "ラーメン", "焼肉", "ランチ", "ディナー", "ごはん", "食事"
+    } else activity
+    if activity in {"パンケーキ", "ケーキ", "スイーツ", "ラーメン", "焼肉", "ランチ", "ディナー", "ごはん", "食事"}:
+        replies = [
+            f"{activity}いいですね！よかったら今度、{venue}で一緒に食べませんか？",
+            f"僕も{activity}が好きです。今度、{venue}に一緒に食べに行ってみませんか？",
+            f"気になってる{subject}、よければ今度一緒に行ってみませんか？",
+        ][:expected_candidates]
+    else:
+        replies = [
+            f"{activity}いいですね！よかったら今度、{venue}に一緒に行きませんか？",
+            f"僕も{activity}が好きです。今度、{venue}に一緒に行ってみませんか？",
+            f"体験してみたいんですね！よかったら今度、{venue}で一緒に体験してみませんか？",
+        ][:expected_candidates]
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="invite",
+        conversation_messages=conversation_messages,
+    )
+    if violations:
+        return None
+
+    strategy = TappleStrategy(
+        action="invite",
+        rationale=(
+            "相手が共通の活動について新しい具体的な希望を伝え、本人も同じ活動への関心を示しています。"
+            "会う同意とは区別して、断りやすく誘います。"
+        ),
+        evidence=[last_contact],
+        invite_example=invite_example,
+    )
+    return replies, strategy
+
+
+def _tapple_low_reciprocity_echo_context(
+    conversation_messages: list[dict[str, Any]],
+) -> tuple[str, str, str] | None:
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0:
+        return None
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    if (
+        not _TAPPLE_ACTIVITY_INTEREST_RE.search(last_contact)
+        or _tapple_invited_activity_terms(last_contact)
+        or _TAPPLE_THIRD_PARTY_INTEREST_RE.search(last_contact)
+        or _TAPPLE_REPORTED_THIRD_PARTY_QUOTE_RE.search(last_contact)
+        or _has_explicit_solo_activity_preference(last_contact)
+        or _has_tapple_explicit_hesitation(last_contact)
+        or _has_unresolved_tapple_safety_or_hesitation(
+            conversation_messages, last_contact_index
+        )
+        or _has_recent_shared_tapple_activity(
+            conversation_messages, last_contact_index, last_contact
+        )
+    ):
+        return None
+
+    previous_contact_index = next(
+        (
+            index
+            for index in range(last_contact_index - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if previous_contact_index < 0:
+        return None
+    previous_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[previous_contact_index].get("content") or "")
+    )
+    if not _TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(previous_contact.strip()):
+        return None
+
+    last_self = next(
+        (
+            prompt.clean_chat_message_content(
+                str(conversation_messages[index].get("content") or "")
+            )
+            for index in range(last_contact_index - 1, previous_contact_index, -1)
+            if conversation_messages[index].get("sender") == "self"
+        ),
+        "",
+    )
+    if not last_self or not re.search(r"(?:気にな|興味|好き|行きたい|食べたい)", last_self):
+        return None
+
+    shared_terms = sorted(
+        (
+            term
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            if term in _TAPPLE_AUTO_INVITE_VENUES
+            and term in last_contact
+            and term in last_self
+        ),
+        key=len,
+        reverse=True,
+    )
+    if not shared_terms:
+        return None
+    term = shared_terms[0]
+    if term not in {"パンケーキ", "カフェ", "喫茶", "コーヒー", "紅茶", "スイーツ", "ケーキ", "ランチ", "ディナー", "ごはん", "食事", "焼肉", "ラーメン"}:
+        return None
+    subject = (
+        f"{term}のお店"
+        if any(place in f"{last_self} {last_contact}" for place in ("お店", "店"))
+        else term
+    )
+    return term, subject, last_self
+
+
+def _tapple_low_reciprocity_reply_progresses(reply: str, last_self: str) -> bool:
+    """Reject weak-ack replies that echo the user's last topic instead of exploring it."""
+    normalized_reply = re.sub(r"[\s、。，．,.！!？?]", "", unicodedata.normalize("NFKC", reply))
+    normalized_self = re.sub(r"[\s、。，．,.！!？?]", "", unicodedata.normalize("NFKC", last_self))
+    common_prefix = 0
+    for left, right in zip(normalized_reply, normalized_self):
+        if left != right:
+            break
+        common_prefix += 1
+    if common_prefix >= 3 and re.search(
+        r"(?:気になりますよね|気になってました|気になってますよね|"
+        r"良さそうですよね|いいですね|楽しみですね)",
+        reply,
+    ):
+        return False
+    has_open_question = bool(
+        re.search(
+            r"(?:どんな|どの|どちら|どっち|どれくらい|どのくらい|どれほど|"
+            r"どのような|何|なに|どういう|どうして|なんで|きっかけ|どこ|いつ|誰)",
+            reply,
+        )
+    )
+    if not has_open_question or not re.search(r"[？?]", reply):
+        return False
+    if re.search(r"あそこ|あのお店|あの店|人気|有名|評判|行列|混んで", reply):
+        return False
+    if "気にな" in last_self and re.search(
+        r"(?:気になりますよね|僕も.{0,12}気にな|私も.{0,12}気にな)", reply
+    ):
+        return False
+    if re.search(r"(?:どんな|どの|何).{0,12}があるか気になりますか", reply):
+        return False
+    return True
+
+
+def _build_tapple_low_reciprocity_echo_fallback(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> tuple[list[str], TappleStrategy] | None:
+    if expected_candidates not in {1, 2, 3}:
+        return None
+    context = _tapple_low_reciprocity_echo_context(conversation_messages)
+    if not context:
+        return None
+    activity, subject, _last_self = context
+    if activity == "パンケーキ":
+        replies = [
+            "パンケーキって、ふわふわ系としっかり系ならどちらが好みですか？",
+            "パンケーキのお店を選ぶなら、雰囲気とメニューどちらを重視しますか？",
+            "近いうちに行くなら、どんなパンケーキのお店が気になりますか？",
+        ]
+    elif "お店" in subject:
+        replies = [
+            f"ちなみに、{activity}だとどんなところが好きですか？",
+            f"お店を選ぶなら、{activity}では雰囲気とメニューのどちらが気になりますか？",
+            f"近いうちに行くなら、どんな{activity}のお店が気になりますか？",
+        ]
+    else:
+        replies = [
+            f"ちなみに、{activity}ってどんなところが好きですか？",
+            f"メニューなら、{activity}で何が気になりますか？",
+            f"近いうちに食べるなら、どんな{activity}がいいですか？",
+        ]
+    replies = replies[:expected_candidates]
+    last_contact = next(
+        prompt.clean_chat_message_content(str(message.get("content") or ""))
+        for message in reversed(conversation_messages)
+        if message.get("sender") == "contact"
+    )
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation_messages,
+    )
+    if violations:
+        return None
+    strategy = TappleStrategy(
+        action="wait",
+        rationale=(
+            "相手は活動に関心を示していますが、直前の本人の提案に対する短い相づちに続く発言のため、"
+            "一緒に行く意思とはみなさず、誘わずに話題を一歩進めます。"
+        ),
+        evidence=[last_contact],
+        invite_example=None,
+    )
+    return replies, strategy
 
 
 def _parse_tapple_strategy(
@@ -1965,10 +2507,52 @@ def _parse_tapple_strategy(
         conversation_messages, last_contact_index
     )
     if decline_match:
+        decline_is_latest_contact = decline_match.string == last_contact
         return TappleStrategy(
             action="stop",
-            rationale="相手が会うことに明確な難しさを示しているため、誘い直さずここで止めます。",
-            evidence=[_tapple_decline_evidence_quote(decline_match)],
+            rationale=(
+                "相手は会うことを断っているため、誘い直さずここで止めます。"
+                if decline_is_latest_contact
+                else "以前の断りを受け止めた後、相手も短く同意しているため誘い直さずここで止めます。"
+            ),
+            evidence=[
+                _tapple_decline_evidence_quote(decline_match)
+                if decline_is_latest_contact
+                else last_contact
+            ],
+            invite_example=None,
+        )
+
+    if _has_tapple_low_engagement_sequence(conversation_messages, last_contact_index):
+        return TappleStrategy(
+            action="wait",
+            rationale=(
+                "直近で相手の返答が続けて短くなり、こちらの話題にも広がりが見られないため、"
+                "話を押し広げず自然に引きます。"
+            ),
+            evidence=[last_contact],
+            invite_example=None,
+        )
+
+    counterproposal_match = _TAPPLE_COUNTERPROPOSAL_RE.search(last_contact)
+    later_date_unavailability = bool(
+        counterproposal_match
+        and any(
+            unavailable.start() >= counterproposal_match.end()
+            for unavailable in _TAPPLE_DATE_UNAVAILABILITY_RE.finditer(last_contact)
+        )
+    )
+    if (
+        counterproposal_match
+        and not later_date_unavailability
+        and _has_prior_self_tapple_invitation(conversation_messages, last_contact_index)
+        and not _has_tapple_explicit_hesitation(last_contact)
+        and not _has_tapple_safety_concern(last_contact)
+    ):
+        return TappleStrategy(
+            action="continue",
+            rationale="相手が誘いの日程に代替日を示したため、本人の予定を確認して調整します。",
+            evidence=[last_contact],
             invite_example=None,
         )
 
@@ -1991,17 +2575,91 @@ def _parse_tapple_strategy(
             invite_example=None,
         )
 
+    current_activity_terms = _current_tapple_positive_activity_terms(last_contact)
+    disinterest_check_terms = current_activity_terms
+    if proposed.action == "invite" and proposed.invite_example:
+        invitation_terms = {
+            term for term in _TAPPLE_SHARED_ACTIVITY_TERMS if term in proposed.invite_example
+        }
+        if invitation_terms:
+            # Check the user's history against the proposed activity itself. The
+            # contact's enthusiasm cannot resolve the user's earlier dislike.
+            disinterest_check_terms = invitation_terms
+    recent_activity_disinterest = any(
+        _has_recent_self_disinterest_in_tapple_activity(
+            conversation_messages, last_contact_index, term
+        )
+        for term in disinterest_check_terms
+    )
+    if recent_activity_disinterest and proposed.action in {"invite", "continue"}:
+        return TappleStrategy(
+            action="wait",
+            rationale=(
+                "本人はこの活動に苦手意識を伝えているため、自分も関心があるように返さず、"
+                "別の話題へ自然に応じます。"
+            ),
+            evidence=exact_evidence,
+            invite_example=None,
+        )
+
+    if (
+        proposed.action == "continue"
+        and _TAPPLE_ACTIVITY_INTEREST_RE.search(last_contact)
+        and _has_recent_shared_tapple_activity(
+            conversation_messages, last_contact_index, last_contact
+        )
+        and not _TAPPLE_THIRD_PARTY_INTEREST_RE.search(last_contact)
+        and not _TAPPLE_REPORTED_THIRD_PARTY_QUOTE_RE.search(last_contact)
+        and not _has_explicit_solo_activity_preference(last_contact)
+        and not _tapple_invited_activity_terms(last_contact)
+        and not _has_tapple_explicit_hesitation(last_contact)
+        and not _has_unresolved_tapple_safety_or_hesitation(
+            conversation_messages, last_contact_index
+        )
+    ):
+        shared_interest_invite_example = _build_tapple_shared_interest_invite_example(
+            conversation_messages, last_contact_index, last_contact
+        )
+        if shared_interest_invite_example:
+            return proposed.model_copy(
+                update={
+                    "action": "invite",
+                    "rationale": (
+                        "相手が共通の活動について新しい具体的な希望を伝え、"
+                        "本人も同じ活動への関心を示しているため、会う同意とは区別して"
+                        "断りやすい誘いを提案します。"
+                    ),
+                    "evidence": exact_evidence,
+                    "invite_example": shared_interest_invite_example,
+                }
+            )
+
+    if (
+        proposed.action == "continue"
+        and _TAPPLE_ACTIVITY_INTEREST_RE.search(last_contact)
+        and not any(mark in last_contact for mark in ("？", "?"))
+        and not _tapple_invited_activity_terms(last_contact)
+        and not _has_recent_shared_tapple_activity(
+            conversation_messages, last_contact_index, last_contact
+        )
+        and not _has_unresolved_tapple_safety_or_hesitation(
+            conversation_messages, last_contact_index
+        )
+    ):
+        return proposed.model_copy(
+            update={
+                "action": "wait",
+                "rationale": (
+                    "相手は活動に関心を示していますが、直前までの相互性は弱く、"
+                    "会う意思や一緒に行く提案も確認できないため、今は誘わず反応を待ちます。"
+                ),
+                "invite_example": None,
+            }
+        )
+
     if proposed.action == "invite":
         has_unresolved_safety_or_hesitation = _has_unresolved_tapple_safety_or_hesitation(
             conversation_messages, last_contact_index
-        )
-        recent_activity_disinterest = any(
-            term in evidence
-            and _has_recent_self_disinterest_in_tapple_activity(
-                conversation_messages, last_contact_index, term
-            )
-            for evidence in exact_evidence
-            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
         )
         has_current_invitation_readiness = any(
             evidence in last_contact
@@ -2114,6 +2772,56 @@ def _parse_tapple_strategy(
     return proposed.model_copy(update={"invite_example": None})
 
 
+def _has_tapple_low_engagement_sequence(
+    conversation_messages: list[dict[str, Any]], last_contact_index: int
+) -> bool:
+    """Detect two terse replies to separate self turns after a conversation cools."""
+    contact_indices = [
+        index
+        for index, message in enumerate(conversation_messages[: last_contact_index + 1])
+        if message.get("sender") == "contact"
+    ]
+    if len(contact_indices) < 2 or contact_indices[-1] != last_contact_index:
+        return False
+    previous_contact_index = contact_indices[-2]
+    acknowledgments = [
+        prompt.clean_chat_message_content(
+            str(conversation_messages[index].get("content") or "")
+        )
+        for index in (previous_contact_index, last_contact_index)
+    ]
+    if not all(_TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(text.strip()) for text in acknowledgments):
+        return False
+    self_turns_between = [
+        prompt.clean_chat_message_content(str(message.get("content") or ""))
+        for message in conversation_messages[previous_contact_index + 1 : last_contact_index]
+        if message.get("sender") == "self"
+    ]
+    if not self_turns_between:
+        return False
+    latest_self_turn = next(
+        (
+            prompt.clean_chat_message_content(str(message.get("content") or ""))
+            for message in reversed(conversation_messages[:last_contact_index])
+            if message.get("sender") == "self"
+        ),
+        "",
+    )
+    if not latest_self_turn or re.search(r"[?？]", latest_self_turn):
+        return False
+    if _has_explicit_tapple_invitation(latest_self_turn):
+        return False
+    return bool(
+        re.search(
+            r"(?:カフェ|喫茶店|お店|店|映画|食事|ごはん|ランチ|ディナー|活動|趣味)",
+            latest_self_turn,
+        )
+        and not _has_unresolved_tapple_safety_or_hesitation(
+            conversation_messages, last_contact_index
+        )
+    )
+
+
 def _build_safe_tapple_fallback_strategy(
     conversation_messages: list[dict[str, Any]],
 ) -> TappleStrategy | None:
@@ -2139,10 +2847,41 @@ def _build_safe_tapple_fallback_strategy(
         conversation_messages, last_contact_index
     )
     if decline_match:
+        decline_is_latest_contact = decline_match.string == last_contact
         return TappleStrategy(
             action="stop",
-            rationale="相手が会うことに明確な難しさを示しているため、誘い直さずここで止めます。",
-            evidence=[_tapple_decline_evidence_quote(decline_match)],
+            rationale=(
+                "相手は会うことを断っているため、誘い直さずここで止めます。"
+                if decline_is_latest_contact
+                else "以前の断りを受け止めた後、相手も短く同意しているため誘い直さずここで止めます。"
+            ),
+            evidence=[
+                _tapple_decline_evidence_quote(decline_match)
+                if decline_is_latest_contact
+                else last_contact
+            ],
+            invite_example=None,
+        )
+
+    counterproposal_match = _TAPPLE_COUNTERPROPOSAL_RE.search(last_contact)
+    later_date_unavailability = bool(
+        counterproposal_match
+        and any(
+            unavailable.start() >= counterproposal_match.end()
+            for unavailable in _TAPPLE_DATE_UNAVAILABILITY_RE.finditer(last_contact)
+        )
+    )
+    if (
+        counterproposal_match
+        and not later_date_unavailability
+        and _has_prior_self_tapple_invitation(conversation_messages, last_contact_index)
+        and not _has_tapple_explicit_hesitation(last_contact)
+        and not _has_tapple_safety_concern(last_contact)
+    ):
+        return TappleStrategy(
+            action="continue",
+            rationale="相手が誘いの日程に代替日を示したため、本人の予定を確認して調整します。",
+            evidence=[last_contact],
             invite_example=None,
         )
 
@@ -2163,6 +2902,291 @@ def _build_safe_tapple_fallback_strategy(
             "相手は直前の誘いを受け入れているため、再度誘わず日程調整へ進みます。"
             if invitation_accepted
             else "戦略判断を安全に確定できないため、会う提案はせず相手の反応を待ちます。"
+        ),
+        evidence=[last_contact],
+        invite_example=None,
+    )
+
+
+def _build_tapple_disliked_activity_decline_fallbacks(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> list[str] | None:
+    """Build a narrow, hard-validated response when a direct invite conflicts with a known boundary."""
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0 or expected_candidates not in {1, 2, 3}:
+        return None
+
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    mentioned_disliked_terms = sorted(
+        (
+            term
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            if term in last_contact
+            and _has_recent_self_disinterest_in_tapple_activity(
+                conversation_messages, last_contact_index, term
+            )
+        ),
+        key=len,
+        reverse=True,
+    )
+    invited_terms = _tapple_invited_activity_terms(last_contact)
+    disliked_terms = [
+        term
+        for term in mentioned_disliked_terms
+        if any(
+            _topics_overlap(term, invited_term)
+            or _topics_overlap(invited_term, term)
+            for invited_term in invited_terms
+        )
+    ]
+    if not disliked_terms:
+        return None
+
+    activity = disliked_terms[0]
+    replies = [
+        f"{activity}は苦手なので、今回は遠慮します。",
+        f"{activity}は苦手です。今回はやめておきます。",
+        f"{activity}は苦手なので、今回は難しいです。",
+    ][:expected_candidates]
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation_messages,
+    )
+    return None if violations else replies
+
+
+def _build_tapple_disliked_activity_interest_fallbacks(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> list[str] | None:
+    """Keep a reply contextual when the contact likes an activity the user dislikes."""
+    if expected_candidates not in {1, 2, 3}:
+        return None
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0:
+        return None
+
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    if _tapple_invited_activity_terms(last_contact) or _TAPPLE_THIRD_PARTY_INTEREST_RE.search(
+        last_contact
+    ):
+        return None
+    disliked_terms = sorted(
+        (
+            term
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            if term in last_contact
+            and term in _current_tapple_positive_activity_terms(last_contact)
+            and _has_recent_self_disinterest_in_tapple_activity(
+                conversation_messages, last_contact_index, term
+            )
+        ),
+        key=len,
+        reverse=True,
+    )
+    if not disliked_terms:
+        return None
+
+    activity = disliked_terms[0]
+    if activity not in {"カフェ", "喫茶", "コーヒー", "紅茶"}:
+        return None
+    replies = [
+        f"{activity}はあまり好きではないんですけど、どんなところが気になったんですか？",
+        f"{activity}はあまり好みではないんですが、そのお店はどんな感じなんですか？",
+        f"{activity}はあまり得意ではないんですけど、普段は何を頼むことが多いんですか？",
+    ][:expected_candidates]
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation_messages,
+    )
+    return None if violations else replies
+
+
+def _build_tapple_counterproposal_schedule_check_fallbacks(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> list[str] | None:
+    """Return grounded scheduling replies when a counterproposal lacks self availability."""
+    if expected_candidates not in {1, 2, 3}:
+        return None
+
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0:
+        return None
+
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    counterproposal_match = _TAPPLE_COUNTERPROPOSAL_RE.search(last_contact)
+    later_date_unavailability = bool(
+        counterproposal_match
+        and any(
+            unavailable.start() >= counterproposal_match.end()
+            for unavailable in _TAPPLE_DATE_UNAVAILABILITY_RE.finditer(last_contact)
+        )
+    )
+    if (
+        not counterproposal_match
+        or later_date_unavailability
+        or not _has_prior_self_tapple_invitation(
+            conversation_messages, last_contact_index
+        )
+        or _has_tapple_explicit_hesitation(last_contact)
+        or _has_tapple_safety_concern(last_contact)
+        or _unresolved_tapple_decline_match(
+            conversation_messages, last_contact_index
+        )
+    ):
+        return None
+
+    offered_periods = list(_AVAILABILITY_PERIOD_RE.finditer(last_contact))
+    if not offered_periods:
+        return None
+    offered_period = offered_periods[-1].group()
+    prior_self_messages = [
+        prompt.clean_chat_message_content(str(message.get("content") or ""))
+        for message in conversation_messages[:last_contact_index]
+        if message.get("sender") == "self"
+    ]
+    if not _has_unconfirmed_tapple_counterproposal_availability(
+        f"{offered_period}なら大丈夫です", last_contact, prior_self_messages
+    ):
+        return None
+    replies = [
+        f"{offered_period}なら、まず自分の予定を確認してみますね！",
+        f"{offered_period}ならいいですね！こちらの予定がわかったら、待ち合わせの時間を相談しましょう。",
+        f"{offered_period}なら行けるか、自分の予定を確かめてから連絡しますね。",
+    ][:expected_candidates]
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="continue",
+        conversation_messages=conversation_messages,
+    )
+    if violations:
+        return None
+    return replies
+
+
+def _build_tapple_acknowledged_decline_closing_fallbacks(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> list[str] | None:
+    """Return contextual, pressure-free closings after a refusal was acknowledged."""
+    if expected_candidates not in {1, 2, 3}:
+        return None
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if (
+        last_contact_index < 0
+        or not _has_tapple_acknowledged_decline_context(
+            conversation_messages, last_contact_index
+        )
+        or not _TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(
+            prompt.clean_chat_message_content(
+                str(conversation_messages[last_contact_index].get("content") or "")
+            ).strip()
+        )
+    ):
+        return None
+
+    replies = [
+        "気にしないでくださいね！",
+        "気持ちを伝えてくれてありがとう。大丈夫だよ。",
+        "話してくれてありがとう。カフェの話はここまでにするね。",
+    ][:expected_candidates]
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="stop",
+        conversation_messages=conversation_messages,
+    )
+    return None if violations else replies
+
+
+def _build_tapple_low_engagement_closing_fallbacks(
+    conversation_messages: list[dict[str, Any]], expected_candidates: int
+) -> tuple[list[str], TappleStrategy] | None:
+    if expected_candidates not in {1, 2, 3}:
+        return None
+    last_contact_index = next(
+        (
+            index
+            for index in range(len(conversation_messages) - 1, -1, -1)
+            if conversation_messages[index].get("sender") == "contact"
+        ),
+        -1,
+    )
+    if last_contact_index < 0 or not _has_tapple_low_engagement_sequence(
+        conversation_messages, last_contact_index
+    ):
+        return None
+    replies = [
+        "そうなんだね、カフェの話はここまでにしておくね",
+        "そっか、こっちからこの話を続けるのはやめておくね",
+        "うん、ここでいったん話を止めておくね",
+    ][:expected_candidates]
+    last_contact = prompt.clean_chat_message_content(
+        str(conversation_messages[last_contact_index].get("content") or "")
+    )
+    violations = validate_candidate_replies(
+        replies,
+        expected_candidates=expected_candidates,
+        counterpart_message=last_contact,
+        strategy_mode="tapple",
+        tapple_action="wait",
+        conversation_messages=conversation_messages,
+    )
+    if violations:
+        return None
+    return replies, TappleStrategy(
+        action="wait",
+        rationale=(
+            "相手の返事が続けて短くなり、こちらから話題を広げても会話が続いていないため、"
+            "質問を足さず自然に引きます。"
         ),
         evidence=[last_contact],
         invite_example=None,
@@ -2566,6 +3590,46 @@ def _preference_polarity(
     return next(iter(polarities), None)
 
 
+def _latest_preference_polarity(text: str, topic: str) -> str | None:
+    """Use a later correction in a SELF statement as the current preference."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    for correction in reversed(
+        list(re.finditer(r"(?:けど|けれど(?:も)?|だけど|ですが|でも)[、,\s]*", normalized))
+    ):
+        suffix = normalized[correction.end():]
+        if not suffix:
+            continue
+        correction_clause = re.split(r"[。！？?！、,\n]", suffix, maxsplit=1)[0]
+        if not correction_clause:
+            continue
+        if _is_question_line(correction_clause) or re.search(
+            r"(?:あなた|相手|友達|友人|彼氏|彼女|彼|あの人|その人|家族|同僚|"
+            r"旦那|夫|妻|父|母|兄|姉|弟|妹)(?:は|も|が)", correction_clause
+        ):
+            prior_polarity = _preference_polarity(
+                normalized[:correction.start()], topic
+            )
+            if prior_polarity in {"positive", "negative"}:
+                return prior_polarity
+            continue
+        if _topics_overlap(topic, correction_clause):
+            polarity = _preference_polarity(correction_clause, topic)
+        else:
+            topicless_suffix = re.sub(r"^(?:今|現在|最近)(?:は|なら)?", "", correction_clause)
+            explicit_topic = _personal_desire_topic(topicless_suffix)
+            if explicit_topic and not _topics_overlap(topic, explicit_topic):
+                polarity = None
+            else:
+                polarity = _preference_polarity(
+                    topicless_suffix, topic, allow_topicless_answer=True
+                )
+        if polarity in {"positive", "negative"}:
+            return polarity
+        if polarity == "conflict":
+            return None
+    return _preference_polarity(normalized, topic)
+
+
 def _preference_claim_topics(reply: str, topics: list[str]) -> set[str]:
     normalized = unicodedata.normalize("NFKC", reply or "")
     claims = set()
@@ -2589,7 +3653,13 @@ def _preference_claim_topics(reply: str, topics: list[str]) -> set[str]:
 def _personal_schedule_question_topic(counterpart_message: str) -> str:
     """Classify direct questions about the user's availability or wake-up time."""
     normalized = unicodedata.normalize("NFKC", counterpart_message or "")
-    looks_like_question = bool(re.search(r"[?？]|(?:空いてる|空いてます|空いています|行ける|行けます|いける|いけます|大丈夫)$", normalized))
+    looks_like_question = bool(
+        re.search(
+            r"[?？]|(?:空いてる|空いてます|空いています|行ける|行けます|いける|いけます|大丈夫)$|"
+            r"(?:んですか|んでしょうか|ですか|ますか|でしょうか|かな|よね)$",
+            normalized,
+        )
+    )
     if not looks_like_question:
         return ""
     date_or_availability = r"(?:(?:20\d{2}年)?\d{1,2}(?:月|/)\d{1,2}日?|来月(?:の)?\d{1,2}日?|今月(?:の)?\d{1,2}日?|(?:今度の|次の)?[月火水木金土日]曜(?:日)?|明後日|明日|今日|土日|週末|平日|来週|今週|いつ|何日|何曜日)"
@@ -2609,6 +3679,36 @@ _AVAILABILITY_PERIOD_RE = re.compile(
     r"来月(?:の)?\d{1,2}日?|今月(?:の)?\d{1,2}日?|"
     r"(?:今度の|次の)?[月火水木金土日]曜(?:日)?|"
     r"来週(?:末|土日)?|今週(?:末|土日)?|明後日|明日|今日|土日|週末|平日"
+)
+_TAPPLE_SELF_AVAILABILITY_ASSERTION_RE = re.compile(
+    r"(?:(?:なら|は|も|で|が).{0,5})?"
+    r"(?:大丈夫(?:です|ですよ|だよ)?|空いて(?:います|ます|いる|る)(?:よ)?|"
+    r"都合(?:が)?(?:つきます|つく(?!か))|行け(?:そう(?:です|だよ)?|ます|る)|"
+    r"いけ(?:そう(?:です|だよ)?|ます|る)|(?:予定を)?合わせられます)"
+    r"(?!なんですね|ですね|か|(?:よ)?ね[?？])"
+)
+_TAPPLE_AVAILABILITY_REFLECTION_RE = re.compile(
+    r"(?:大丈夫|空いて|都合がつく|行け|いけ).{0,12}"
+    r"(?:なんですね|んですね|なんだね|んだね|ですね|だね|ってことですね|ということですね)"
+    r"(?:[、,。.!！?？]|$)"
+)
+_TAPPLE_EXPLICIT_AVAILABILITY_QUESTION_RE = re.compile(
+    r"[?？]|(?:んですか|んでしょうか|ですか|ますか|でしょうか|かな|よね)$"
+)
+_TAPPLE_SHORT_ACK_ONLY_RE = re.compile(
+    r"(?:そうですね|ですね|そうなんですね|わかりました|分かりました|了解です|"
+    r"そうか|そっか|はい|うん)(?:[。.!！、,]|笑|ｗ|w)*"
+)
+_TAPPLE_STOP_FUTURE_CONTACT_RE = re.compile(
+    r"(?:また|今度).{0,10}(?:会|行|誘|連絡|話|相談)|"
+    r"(?:また)?(?:タイミングが合えば|タイミングが合ったら|気が向いたら|落ち着いたら|いつか)"
+    r".{0,14}(?:会|行|誘|連絡|話|相談|よろしく)"
+)
+_TAPPLE_RECHECK_CONTACT_SCHEDULE_RE = re.compile(
+    r"(?:そっち|そちら|相手|あなた).{0,6}(?:の)?(?:予定|都合|空き).{0,6}"
+    r"(?:確認|確かめ|見て|調べ)|(?<!自分の)(?<!こちらの)(?<!私の)"
+    r"(?:予定|都合|空き)(?:も|まで).{0,6}"
+    r"(?:確認|確かめ|見て|調べ)"
 )
 
 
@@ -2670,6 +3770,135 @@ def _availability_period_matches(requested: str, known: str) -> bool:
     if requested in {"今週", "来週"}:
         return known in {requested, f"{requested}末"}
     return False
+
+
+def _has_unconfirmed_tapple_counterproposal_availability(
+    reply: str,
+    counterpart_message: str,
+    prior_self_messages: list[str],
+) -> bool:
+    offered_periods = _availability_periods(counterpart_message)
+    if not offered_periods:
+        return False
+
+    latest_self_message = next(
+        (message for message in reversed(prior_self_messages) if message.strip()),
+        "",
+    )
+    self_availability_statements = re.split(r"(?<=[。.!！?？\n])", latest_self_message)
+    known_self_availability = {
+        period
+        for statement in self_availability_statements
+        if not (
+            _TAPPLE_EXPLICIT_AVAILABILITY_QUESTION_RE.search(statement)
+            and _personal_schedule_question_topic(statement) == "availability"
+        )
+        for period, polarity in _availability_claims_by_period(
+            _TAPPLE_AVAILABILITY_REFLECTION_RE.sub("", statement)
+        ).items()
+        if polarity == "available"
+    }
+    normalized_reply = unicodedata.normalize("NFKC", reply or "")
+    reply_periods = list(_AVAILABILITY_PERIOD_RE.finditer(normalized_reply))
+    for index, period_match in enumerate(reply_periods):
+        period = _canonical_availability_period(period_match.group())
+        if not any(
+            _availability_period_matches(offered, period)
+            for offered in offered_periods
+        ):
+            continue
+        segment_end = (
+            reply_periods[index + 1].start()
+            if index + 1 < len(reply_periods)
+            else len(normalized_reply)
+        )
+        segment = normalized_reply[period_match.start() : segment_end]
+        has_question_form = bool(
+            re.search(
+                r"[?？]|(?:んですか|んでしょうか|ですか|ますか|でしょうか|かな|よね)[。.!！]*$",
+                segment,
+            )
+        )
+        if has_question_form and _personal_schedule_question_topic(segment) == "availability":
+            question_boundary = re.search(
+                r"[?？]|(?:んですか|んでしょうか|ですか|ますか|でしょうか|かな|よね)",
+                segment,
+            )
+            assertion_segment = (
+                segment[question_boundary.end() :].lstrip(" 、,。.!！")
+                if question_boundary
+                else ""
+            )
+            if not assertion_segment:
+                continue
+        else:
+            assertion_segment = segment
+        assertion_segment = _TAPPLE_AVAILABILITY_REFLECTION_RE.sub("", assertion_segment)
+        if not _TAPPLE_SELF_AVAILABILITY_ASSERTION_RE.search(assertion_segment):
+            continue
+        if not any(
+            _availability_period_matches(period, known)
+            for known in known_self_availability
+        ):
+            return True
+    return False
+
+
+def _has_tapple_acknowledged_decline_context(
+    conversation_messages: list[dict[str, Any]], last_contact_index: int
+) -> bool:
+    if last_contact_index <= 0 or not _unresolved_tapple_decline_match(
+        conversation_messages, last_contact_index
+    ):
+        return False
+    latest_self_message = next(
+        (
+            prompt.clean_chat_message_content(str(message.get("content") or ""))
+            for message in reversed(conversation_messages[:last_contact_index])
+            if message.get("sender") == "self"
+        ),
+        "",
+    )
+    return bool(
+        re.search(
+            r"(?:わかりました|分かりました|無理に誘いません|気にしないで|また今度に)",
+            latest_self_message,
+        )
+    )
+
+
+def _starts_with_tapple_latest_acknowledgment(reply: str, counterpart_message: str) -> bool:
+    acknowledgment = counterpart_message.strip()
+    if not _TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(acknowledgment):
+        return False
+    normalized_reply = unicodedata.normalize("NFKC", reply or "").strip()
+    normalized_acknowledgment = unicodedata.normalize("NFKC", acknowledgment)
+    variants = {normalized_acknowledgment}
+    short_ack_variants = {
+        "そうですね": "ですね",
+        "そうなんですね": "なんですね",
+        "そうだね": "だね",
+    }
+    if normalized_acknowledgment in short_ack_variants:
+        variants.add(short_ack_variants[normalized_acknowledgment])
+    return any(normalized_reply.startswith(variant) for variant in variants if variant)
+
+
+def _repeats_tapple_decline_reassurance(
+    reply: str, conversation_messages: list[dict[str, Any]], last_contact_index: int
+) -> bool:
+    latest_self_message = next(
+        (
+            prompt.clean_chat_message_content(str(message.get("content") or ""))
+            for message in reversed(conversation_messages[:last_contact_index])
+            if message.get("sender") == "self"
+        ),
+        "",
+    )
+    return bool(
+        re.search(r"無理に誘わない|無理に誘いません", latest_self_message)
+        and re.search(r"無理に誘(?:わ|い|っ)", reply)
+    )
 
 
 def _availability_polarity(text: str) -> str | None:
@@ -2884,6 +4113,17 @@ def _personal_desire_topic(text: str) -> str:
     prefix = re.sub(r"(?:行ってきた|行ってきました|行った|見てきた|見てきました|観てきた|食べてきた|してきた|してきました|してた|していました|しました|した).*$", "", prefix)
     prefix = re.sub(r"^(?:昨日|今日|最近|この前|先日|今週|来週|週末|土日)+", "", prefix)
     return prefix.strip(" 、。はがをにへでとの")[-10:]
+
+
+def _personal_desire_topics(text: str) -> set[str]:
+    """Return preference topics from every sentence in a SELF statement."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    topics = {
+        topic
+        for clause in re.split(r"[。！？?！!\n]", normalized)
+        if (topic := _personal_desire_topic(clause))
+    }
+    return topics
 
 
 def _topic_ngrams(text: str) -> set[str]:
@@ -3189,26 +4429,76 @@ def _has_unverified_recent_activity(
     )
 
 
-def _has_unverified_explicit_habit(text: str, known_facts: list[str] | None) -> bool:
-    claim = re.search(r"(?:僕|ぼく|私|わたし|俺|自分)(?:も|は|が)?[^。！？!?]{0,35}", text)
+def _has_unverified_explicit_habit(
+    text: str,
+    known_facts: list[str] | None,
+    *,
+    experience_question: tuple[str, re.Match[str], str] | None = None,
+) -> bool:
+    claims = re.findall(r"(?:僕|ぼく|私|わたし|俺|自分)(?:も|は|が)?[^。！？!?]{0,35}", text)
     habit_signal = (
         r"(?:よく|普段|いつも|たまに|時々|ときどき|つい|ふとした時|"
+        r"最近.{0,8}気をつけ(?:て(?:います|ます|いる|る)?|る)|"
         r"こと(?:が)?あります|こと(?:が)?ある|時(?:が)?あります|時(?:が)?ある|考えちゃ|なくすこと)"
     )
-    if not claim or not re.search(habit_signal, claim.group(0)):
-        return False
-    claim_core = re.sub(r"^(?:僕|ぼく|私|わたし|俺|自分)(?:も|は|が)?", "", claim.group(0))
-    claim_core = re.sub(r"(?:よく|普段|いつも|たまに|時々|ときどき|つい|ふとした時)", "", claim_core)
-    claim_core = re.sub(r"(?:こと(?:が)?あります|こと(?:が)?ある|時(?:が)?あります|時(?:が)?ある)", "", claim_core)
-    claim_core = re.sub(r"(?:ます|ました|です|でした|よ|ね|笑|ｗ|w|！|!|。|…|‥|\.)+$", "", claim_core)
-    claim_core = re.sub(r"[\s、。はがをにへでとも]", "", claim_core)
-    if not claim_core:
-        return False
-    return not any(
-        claim_core in re.sub(r"[\s、。はがをにへでとも]", "", unicodedata.normalize("NFKC", fact or ""))
+    grounded_facts = [
+        fact_sentence
         for fact in (known_facts or [])
         if fact
-    )
+        for fact_sentence in re.split(r"[。！？!?、,\r\n]+", fact)
+        if fact_sentence.strip()
+    ]
+
+    def normalize_habit_core(value: str) -> str:
+        normalized = unicodedata.normalize("NFKC", value)
+        normalized = re.sub(r"^(?:自分|本人|self)\s*[:：]\s*", "", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"^(?:僕|ぼく|私|わたし|俺|自分)(?:も|は|が)?", "", normalized)
+        normalized = re.sub(
+            r"(?:最近|よく|普段|いつも|たまに|時々|ときどき|つい|ふとした時)(?:は|も)?",
+            "",
+            normalized,
+        )
+        normalized = re.sub(r"(?:こと(?:が)?あります|こと(?:が)?ある|時(?:が)?あります|時(?:が)?ある)", "", normalized)
+        normalized = re.sub(
+            r"(?:ています|てます|ている|てる|しました|してます|している|する|ます|ました|です|でした|よ|ね|笑|ｗ|w|！|!|。|…|‥|\.)+$",
+            "",
+            normalized,
+        )
+        return re.sub(r"[\s、。はがをにへでとも]", "", normalized)
+
+    for claim_text in claims:
+        habit_match = re.search(habit_signal, claim_text)
+        if not habit_match:
+            continue
+        clauses = [part.strip() for part in re.split(r"[、,]", claim_text) if part.strip()]
+        for clause in clauses:
+            if not re.search(habit_signal, clause):
+                continue
+            # Defer an individual activity clause only if the dedicated
+            # experience validator can ground that same clause.
+            if experience_question and _experience_action(clause):
+                default_action, question_match, question_clause = experience_question
+                topic = _topic_before(question_clause, question_match.start())
+                experience_claim = _experience_claim(clause, topic, default_action)
+                if experience_claim and any(
+                    _fact_supports_experience_claim(fact, experience_claim)
+                    for fact in grounded_facts
+                ):
+                    continue
+            normalized_claim = clause
+            if "気をつけ" in habit_match.group(0) and "気をつけ" in clause:
+                clause_habit_match = re.search(habit_signal, clause)
+                if clause_habit_match:
+                    normalized_claim = clause[: clause_habit_match.end()]
+            claim_core = normalize_habit_core(normalized_claim)
+            if claim_core and not any(
+                claim_core == normalize_habit_core(fact_sentence)
+                for fact_sentence in grounded_facts
+            ):
+                # A broad claim such as "I have been careful lately" must not
+                # inherit a narrower known fact such as "I watch my diet".
+                return True
+    return False
 
 
 def _has_unverified_personal_habit(
@@ -3222,7 +4512,11 @@ def _has_unverified_personal_habit(
         and (
             _has_unverified_implicit_experience(text, known_self_facts)
             or _has_unverified_recent_activity(text, known_self_facts, counterpart_message)
-            or _has_unverified_explicit_habit(text, known_self_facts)
+            or _has_unverified_explicit_habit(
+                text,
+                known_self_facts,
+                experience_question=_last_experience_question(counterpart_message),
+            )
         )
     )
 
@@ -3400,6 +4694,78 @@ def _prior_history_before_latest_counterpart(chat_history_text: str, counterpart
     if matching_line is None:
         return "\n".join(lines)
     return "\n".join(lines[:matching_line])
+
+
+_PERSONAL_GRATITUDE_RE = re.compile(r"(?:ありがとう|ありがと|助かります|助かった|感謝しています|感謝します)")
+_GRATITUDE_CONTEXT_RE = re.compile(
+    r"(?:ありがとう|ありがと|感謝|手伝|助け|任せ|引き受|教え|送っ|買っ|ごちそう|おご|紹介|協力|対応|"
+    r"してくれ|お願い|大丈夫|心配しないで|気にしないで|安心して|引き受け)"
+)
+_ACKNOWLEDGMENT_ONLY_RE = re.compile(
+    r"^(?:(?:了解|承知|わかった|分かった|わかり|分かり|かしこまりました|かしこまり|把握|なるほど|そうなん|はい|うん|OK|オッケー|いいよ)"
+    r"(?:いたしました|です|ました|しました|した|だよ|だね|ですね|ですよ|ね|よ)?(?:！|!|笑|w|W|😊|🙂|👍)?[、,]?\s*)+$",
+    re.IGNORECASE,
+)
+_NEGATED_GRATITUDE_ACTION_RE = re.compile(
+    r"(?:手伝|助け|教え|送|買|紹介|協力|対応)[^。！？!?、,]{0,12}"
+    r"(?:なかった|なくて|ませんでした|ません|ない|ず)"
+)
+_EXPLICIT_REQUEST_RE = re.compile(
+    r"(?:手伝|助け|教え|送っ|見て|確認|お願い|頼み).{0,16}(?:くれない|もらえる|してくれる|お願いできる|頼める|してもらえる)"
+)
+_SHORT_ACCEPTANCE_RE = re.compile(r"^(?:了解|承知|わかった|分かった|はい|うん|OK|オッケー)(?:です|しました|した|だよ|だね|ね|よ)?[！!。\s]*$", re.IGNORECASE)
+
+
+def _has_ungrounded_personal_gratitude(
+    reply: str, counterpart_message: str, chat_history_text: str
+) -> bool:
+    if not (counterpart_message or "").strip():
+        return False
+    if not _PERSONAL_GRATITUDE_RE.search(unicodedata.normalize("NFKC", reply or "")):
+        return False
+    prior_lines = [
+        line.strip()
+        for line in _prior_history_before_latest_counterpart(
+            chat_history_text, counterpart_message
+        ).splitlines()
+        if line.strip()
+    ]
+    prior_self = ""
+    if prior_lines:
+        match = re.match(r"^自分\s*:\s*(.*)$", prior_lines[-1])
+        if match:
+            prior_self = match.group(1)
+    counterpart = unicodedata.normalize("NFKC", counterpart_message or "")
+    positive_clauses = [
+        clause for clause in re.split(r"[。！？!?、,\n]|けれども|けれど|けど|のに|でも|一方で", counterpart)
+        if clause.strip() and not _NEGATED_GRATITUDE_ACTION_RE.search(clause)
+    ]
+    if any(_GRATITUDE_CONTEXT_RE.search(clause) for clause in positive_clauses):
+        return False
+    normalized_prior_self = unicodedata.normalize("NFKC", prior_self)
+    accepted_request = (
+        bool(_EXPLICIT_REQUEST_RE.search(normalized_prior_self))
+        and bool(_SHORT_ACCEPTANCE_RE.fullmatch(counterpart.strip()))
+    )
+    return not accepted_request
+
+
+def _is_acknowledgment_only(reply: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", reply or "")
+    normalized = re.sub(r"[\s。、!！?？…‥]+$", "", normalized)
+    return bool(_ACKNOWLEDGMENT_ONLY_RE.fullmatch(normalized))
+
+
+def _needs_context_for_standalone_acknowledgment(
+    counterpart_message: str, chat_history_text: str
+) -> bool:
+    if not _is_acknowledgment_only(counterpart_message):
+        return False
+    prior_history = _prior_history_before_latest_counterpart(
+        chat_history_text, counterpart_message
+    )
+    prior_lines = [line for line in prior_history.splitlines() if line.strip()]
+    return not prior_lines or not re.match(r"^\s*自分\s*:", prior_lines[-1])
 
 
 def _is_unresolved_reference_clarification_set(
@@ -3920,6 +5286,58 @@ def validate_candidate_replies(
     相手の質問への回答は Prompt 側（CONVERSATION STATE の要回答質問）で担保する。
     """
     violations: list[str] = []
+    personal_desire_facts = list(known_self_facts or [])
+    if strategy_mode == "tapple" and conversation_messages:
+        latest_self_preference = next(
+            (
+                str(message.get("content") or "")
+                for message in reversed(conversation_messages)
+                if message.get("sender") == "self"
+                and _personal_desire_matches(str(message.get("content") or ""))
+            ),
+            "",
+        )
+        if latest_self_preference:
+            latest_preference_topics = _personal_desire_topics(
+                latest_self_preference
+            )
+            latest_preference_topics.update(
+                topic
+                for fact in personal_desire_facts
+                if (topic := _personal_desire_topic(fact))
+                and _latest_preference_polarity(latest_self_preference, topic)
+            )
+            latest_preference_kinds = {
+                topic: (
+                    f"preference:{polarity}"
+                    if (polarity := _latest_preference_polarity(
+                        latest_self_preference, topic
+                    ))
+                    else _personal_desire_fact_kind(topic, latest_self_preference)
+                )
+                for topic in latest_preference_topics
+                if topic and (
+                    _latest_preference_polarity(latest_self_preference, topic)
+                    or _personal_desire_fact_kind(topic, latest_self_preference)
+                )
+            }
+            if latest_preference_kinds:
+                personal_desire_facts = [
+                    fact
+                    for fact in personal_desire_facts
+                    if not any(
+                        _topics_overlap(topic, fact)
+                        and _personal_desire_fact_kind(topic, fact)
+                        not in {None, latest_kind}
+                        for topic, latest_kind in latest_preference_kinds.items()
+                    )
+                ]
+            personal_desire_facts.append(latest_self_preference)
+            personal_desire_facts.extend(
+                f"{topic}{'好き' if kind == 'preference:positive' else '苦手'}"
+                for topic, kind in latest_preference_kinds.items()
+                if kind in {"preference:positive", "preference:negative"}
+            )
 
     # 案数チェック
     if len(replies) != expected_candidates:
@@ -3932,6 +5350,68 @@ def validate_candidate_replies(
         elif _matches_gold_reply_copy(rep, style_reference_replies):
             violations.append(
                 f"案{i}が過去のGold返信をコピーしています。内容は引き継ぎつつ、今回の会話に合わせて独立した文面にしてください。"
+            )
+        if (
+            mode == "normal"
+            and re.search(r"疲れ|疲れた|疲れて", counterpart_message or "")
+            and re.search(r"お疲れ様ですね", rep)
+        ):
+            violations.append(
+                f"案{i}の「お疲れ様ですね」は、この疲れへの返信として不自然です。"
+                "「お疲れ様です」など自然な労いに直してください。"
+            )
+        counterpart_clauses = re.split(r"[。！？!?\n]+", counterpart_message or "")
+        fatigue_term_re = r"疲れ|疲労|眠(?:い|た|く|気)|体調|具合|しんど|だる"
+        negated_fatigue_suffix_res = (
+            r"^(?:(?:は|が|も|て|く)?(?:は|が)?(?:全然|あまり)?"
+            r"(?:ない|ありません|なかった|ていない|てない|てません|いない|いません))"
+            r"(?!わけ(?:では|じゃ|でも)ない|とは言えない|とは言えません)",
+            r"^(?:(?:てる|ている|ています?)?わけ(?:では|じゃ|でも)ない)",
+            r"^(?:(?:た|てる|ている)?(?:って|という)?ほど(?:では|じゃ|でも)ない)",
+            r"^(?:た)?とは(?:言えない|言えません)(?!わけ(?:では|じゃ|でも)ない)",
+            r"^(?:(?:が|は)?悪いわけ(?:では|じゃ|でも)ない)",
+            r"^(?:(?:が|は)?(?:大丈夫(?:です|だ|だった)?|平気(?:です|だ|だった)?))"
+            r"(?!じゃない|ではない|じゃありません|ではありません|じゃなかった|ではなかった|"
+            r"わけ(?:では|じゃ|でも)ない|とは言えない|とは言えません|と言えない|と言えません)",
+            r"^(?:(?:が|は)?問題(?:は)?(?:ない|ありません|なかった))"
+            r"(?!わけ(?:では|じゃ|でも)ない|とは言えない|とは言えません)",
+            r"^(?:(?:が|は)?悪く(?:は|じゃ|でも)?(?:ない|ありません|なかった))"
+            r"(?!わけ(?:では|じゃ|でも)ない|とは言えない|とは言えません)",
+        )
+        positive_fatigue_spans = []
+        for clause in counterpart_clauses:
+            for fatigue_match in re.finditer(fatigue_term_re, clause):
+                following_text = clause[fatigue_match.end() : fatigue_match.end() + 14]
+                if not any(
+                    re.search(pattern, following_text)
+                    for pattern in negated_fatigue_suffix_res
+                ):
+                    positive_fatigue_spans.append((clause, fatigue_match))
+        counterpart_used_humor_in_fatigue_clause = any(
+            any(
+                abs(laughter.start() - fatigue.end()) <= 8
+                or abs(fatigue.start() - laughter.end()) <= 8
+                for fatigue_clause, fatigue in positive_fatigue_spans
+                if fatigue_clause == clause
+                for laughter in re.finditer(
+                    r"(?:笑+(?![うえるわいっ])|(?<![A-Za-z])[wW]+(?![A-Za-z])|[😂🤣😆])",
+                    clause,
+                )
+            )
+            for clause in counterpart_clauses
+        )
+        if (
+            mode in {"normal", "followup"}
+            and positive_fatigue_spans
+            and not counterpart_used_humor_in_fatigue_clause
+            and re.search(
+                r"(?:笑+(?![うえるわいっ])|(?<![A-Za-z])[wW]+(?![A-Za-z])|[😂🤣😆])",
+                rep,
+            )
+        ):
+            violations.append(
+                f"案{i}が疲れや体調の共有に笑いを添えています。"
+                "相手が同じ内容に冗談や笑いを含めていない場合は、笑い表現を外して自然にいたわってください。"
             )
 
     if strategy_mode == "tapple":
@@ -3948,6 +5428,24 @@ def validate_candidate_replies(
                 if boundary_messages[index].get("sender") == "contact"
             ),
             -1,
+        )
+        disliked_current_activity_terms = {
+            term
+            for term in _TAPPLE_SHARED_ACTIVITY_TERMS
+            if term in counterpart_text
+            and last_boundary_contact_index >= 0
+            and _has_recent_self_disinterest_in_tapple_activity(
+                boundary_messages, last_boundary_contact_index, term
+            )
+        }
+        invited_activity_terms = _tapple_invited_activity_terms(counterpart_text)
+        has_disliked_activity_invitation = any(
+            any(
+                _topics_overlap(disliked_term, invited_term)
+                or _topics_overlap(invited_term, disliked_term)
+                for invited_term in invited_activity_terms
+            )
+            for disliked_term in disliked_current_activity_terms
         )
         has_unqualified_decline = bool(
             last_boundary_contact_index >= 0
@@ -3984,6 +5482,10 @@ def validate_candidate_replies(
         mentioned_activity_terms = [
             term for term in _TAPPLE_SHARED_ACTIVITY_TERMS if term in counterpart_text
         ]
+        already_stated_disliked_activity_interest = (
+            disliked_current_activity_terms
+            & _current_tapple_positive_activity_terms(counterpart_text)
+        )
         prior_self_messages = [
             prompt.clean_chat_message_content(str(message.get("content") or ""))
             for message in boundary_messages
@@ -4014,7 +5516,190 @@ def validate_candidate_replies(
             and not _TAPPLE_THIRD_PARTY_INTEREST_RE.search(counterpart_text)
             and not has_date_unavailability
         )
+        unresolved_meeting_boundary = bool(
+            tapple_action == "wait"
+            and conversation_messages
+            and last_boundary_contact_index >= 0
+            and _has_unresolved_tapple_safety_or_hesitation(
+                boundary_messages, last_boundary_contact_index
+            )
+        )
+        conversation_context_text = " ".join(
+            prompt.clean_chat_message_content(str(message.get("content") or ""))
+            for message in boundary_messages
+        )
+        has_photo_context = bool(
+            re.search(r"写真|画像|メニュー.{0,4}見", conversation_context_text)
+        )
+        prior_self_history_text = " ".join(prior_self_messages)
+        low_engagement_sequence = bool(
+            tapple_action == "wait"
+            and conversation_messages
+            and last_boundary_contact_index >= 0
+            and _has_tapple_low_engagement_sequence(
+                boundary_messages, last_boundary_contact_index
+            )
+        )
+        acknowledged_decline_context = bool(
+            tapple_action == "stop"
+            and conversation_messages
+            and last_boundary_contact_index >= 0
+            and _has_tapple_acknowledged_decline_context(
+                boundary_messages, last_boundary_contact_index
+            )
+            and _TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(counterpart_text.strip())
+        )
         for i, rep in enumerate(replies, start=1):
+            if low_engagement_sequence and (
+                re.search(r"[?？]", rep)
+                or not re.search(
+                    r"(?:ここまでにして|話を止め|話を終え|続けるのはやめ|続けて聞くのは控え|別の話にしておく|また[^。！？!?\n]{0,24}(?:話そう|話しましょう|連絡して|連絡しよう|連絡する|やりとり)|気が向いたら|また話そう|また話しましょう|また話せるときに|話せるときにまた|また話したくなったら|気が向いたらまた|無理せず|ゆっくり|休んで|気にしないで|またね)",
+                    rep,
+                )
+            ):
+                violations.append(
+                    f"案{i}が相手の続く短い相づちの後も会話を押し広げています。"
+                    "質問を足さず、こちらから話題を続けない短い返事にしてください。"
+                )
+            has_specific_boundary_response = bool(
+                re.search(
+                    r"(?:不安|心配|迷い|迷う|怖|安全面).{0,18}(?:ですよね|よね|自然|分かる|わかる|大事|尊重|話してくれて|無理|急が|焦ら)|"
+                    r"(?:会う|直接会う|会うこと).{0,14}(?:急がない|急がず|焦らず|焦らなくて|急がなくて|無理に会わ|無理に会わなくて|安心できてから|会わなくて大丈夫)|"
+                    r"(?:メッセージ|アプリ内|ここで|このまま|ここでは).{0,14}(?:話|続け|やりとり)|"
+                    r"(?:無理に会わなくて|会うのは急がなくて|会うのは焦らなくて)",
+                    rep,
+                )
+            )
+            if unresolved_meeting_boundary and not has_specific_boundary_response:
+                violations.append(
+                    f"案{i}が会うことへの迷いや安全面の懸念を具体的に受け止めていません。"
+                    "『大丈夫』『焦らず』だけにせず、会うことを急がない意向やアプリ内で話す選択肢など、履歴に合う内容を含めてください。"
+                )
+            if (
+                re.search(r"(?:写真|画像)(?:で|を|だと|なら).{0,12}(?:見る|見た|見て|おいしそう|良さそう|よさそう)", rep)
+                and not has_photo_context
+            ):
+                violations.append(
+                    f"案{i}が会話にない写真を見たような反応をしています。"
+                    "画像を見たことを前提にせず、相手が文章で伝えた関心だけに返してください。"
+                )
+            unverified_venue = re.search(
+                r"(?:駅前|近所|近く|あの|その)(?:にある|の)?(?:ジム|スポーツジム|ボルダリング施設|スポーツセンター)",
+                rep,
+            )
+            if unverified_venue and unverified_venue.group() not in conversation_context_text:
+                violations.append(
+                    f"案{i}が未確認の店や場所を実在するように示しています。"
+                    "具体的な施設を作らず、履歴にある場所だけを使うか、場所を一般的に述べてください。"
+                )
+            if (
+                re.search(r"(?:ずっと|前から|以前から|前々から).{0,8}(?:気にな|好き|興味)", rep)
+                and not re.search(
+                    r"(?:ずっと|前から|以前から|前々から).{0,8}(?:気にな|好き|興味)",
+                    prior_self_history_text,
+                )
+            ):
+                violations.append(
+                    f"案{i}が本人の関心の期間を履歴より長くしています。"
+                    "『ずっと』『前から』などの期間を追加せず、確認できる本人の発言だけを使ってください。"
+                )
+            reasks_known_disliked_activity_interest = any(
+                re.search(
+                    rf"(?:{re.escape(term)}|(?:駅前|近所|近く|その|この|あの)(?:の)?(?:お店|店|場所|ところ))"
+                    r"(?:は|も|って|が|に|について)?\s*(?:行ってみたい|行きたい|"
+                    r"気にな(?:る|って(?:いる|います|ます|る))|"
+                    r"興味(?:が)?(?:ある|あります)|興味(?:を)?持って(?:いる|います|ます|る)|"
+                    r"好き)(?:だ)?(?:と思(?:います|う|っています|ってます)?|"
+                    r"とお考え(?:です)?)?(?:(?:ん)?(?:です)?か[?？]?|[?？])$",
+                    rep.strip().rstrip("。.!！"),
+                )
+                for term in already_stated_disliked_activity_interest
+            )
+            if reasks_known_disliked_activity_interest:
+                violations.append(
+                    f"案{i}が本人の苦手な活動への相手の関心を聞き直しています。"
+                    "相手がすでに伝えた希望を再確認せず、会話にある本人の好みも踏まえて返してください。"
+                )
+            if (
+                acknowledged_decline_context
+                and (
+                    _TAPPLE_SHORT_ACK_ONLY_RE.fullmatch(rep.strip())
+                    or _starts_with_tapple_latest_acknowledgment(rep, counterpart_text)
+                )
+            ):
+                violations.append(
+                    f"案{i}が相手の短い相づちを冒頭で繰り返しています。"
+                    "すでに受け止めた断りに短く触れて会話を閉じてください。"
+                )
+            if (
+                acknowledged_decline_context
+                and _TAPPLE_STOP_FUTURE_CONTACT_RE.search(rep)
+            ):
+                violations.append(
+                    f"案{i}が断りを受け止めた後の将来の再連絡・誘いを示しています。"
+                    "新たな約束や再接触を提案せず、ここで会話を閉じてください。"
+                )
+            if (
+                acknowledged_decline_context
+                and conversation_messages
+                and last_boundary_contact_index >= 0
+                and _repeats_tapple_decline_reassurance(
+                    rep, boundary_messages, last_boundary_contact_index
+                )
+            ):
+                violations.append(
+                    f"案{i}が本人の直前の『誘わない』という返事を言い換えて繰り返しています。"
+                    "同じ約束をもう一度説明せず、短く自然に会話を閉じてください。"
+                )
+            if tapple_action == "wait" and disliked_current_activity_terms:
+                positive_activity_terms = _current_tapple_positive_activity_terms(rep)
+                known_other_activity_terms = {
+                    term
+                    for message in prior_self_messages
+                    for term in _extract_tapple_interest_terms(message)
+                    if term not in disliked_current_activity_terms
+                }
+                endorses_disliked_activity = bool(
+                    _tapple_endorsed_activity_terms(rep)
+                    & disliked_current_activity_terms
+                )
+                has_explicit_disinterest_boundary = any(
+                    term in rep
+                    and _TAPPLE_ACTIVITY_DISINTEREST_RE.match(
+                        rep[rep.find(term) + len(term) :]
+                    )
+                    for term in disliked_current_activity_terms
+                )
+                if (
+                    has_disliked_activity_invitation
+                    and not has_explicit_disinterest_boundary
+                    and not _TAPPLE_DECLINE_RE.search(rep)
+                ):
+                    violations.append(
+                        f"案{i}が本人の苦手な活動への誘いに対する意思を明確に伝えていません。"
+                        "話題をずらして終わらせず、本人の好みを尊重した断りや返答をしてください。"
+                    )
+                endorses_other_activity_without_disliked_endorsement = bool(
+                    (
+                        positive_activity_terms
+                        | {term for term in known_other_activity_terms if term in rep}
+                    )
+                    - disliked_current_activity_terms
+                ) and not endorses_disliked_activity
+                if (
+                    _TAPPLE_ACTIVITY_ENDORSEMENT_RE.search(rep)
+                    and (
+                        endorses_disliked_activity
+                        or (
+                            not has_explicit_disinterest_boundary
+                            and not endorses_other_activity_without_disliked_endorsement
+                        )
+                    )
+                ):
+                    violations.append(
+                        f"案{i}が本人の苦手意識を伝えた活動に肯定的に同調しています。"
+                        "本人の関心を装わず、本人の好みを伝えるか別の話題へ移してください。"
+                    )
             if _TAPPLE_UNVERIFIABLE_SAFETY_ASSURANCE_RE.search(rep):
                 violations.append(
                     f"案{i}に実際の安全性を保証する表現があります。"
@@ -4038,6 +5723,18 @@ def validate_candidate_replies(
                     violations.append(
                         f"案{i}に、会話にない本人の活動予定があります。本人の関心を予定や訪問計画に変えず、確認済みの内容だけで返してください。"
                     )
+            if has_counterproposal and _has_unconfirmed_tapple_counterproposal_availability(
+                rep, counterpart_text, prior_self_messages
+            ):
+                violations.append(
+                    f"案{i}が相手の代替日を本人の空き状況として断定しています。"
+                    "相手側の日程を受け止め、本人の予定が不明なら確認してから調整してください。"
+                )
+            if has_counterproposal and _TAPPLE_RECHECK_CONTACT_SCHEDULE_RE.search(rep):
+                violations.append(
+                    f"案{i}が相手がすでに示した代替日の都合をもう一度確認しようとしています。"
+                    "本人の日程だけを確認してください。"
+                )
             self_proposed_date = (
                 first_person_counterproposal.group("date")
                 if first_person_counterproposal
@@ -4163,6 +5860,26 @@ def validate_candidate_replies(
                     "相手が断っている場合は、誘い直しや説得をせずに返してください。"
                 )
 
+        if tapple_action in {"wait", "continue"} and conversation_messages:
+            low_reciprocity_context = _tapple_low_reciprocity_echo_context(
+                conversation_messages
+            )
+            if (
+                low_reciprocity_context
+                and replies
+                and any(
+                    not _tapple_low_reciprocity_reply_progresses(
+                        reply, low_reciprocity_context[2]
+                    )
+                    for reply in replies
+                )
+            ):
+                violations.append(
+                    "返信が直前に本人の伝えた話の繰り返しになっているか、相手の希望を具体化する開かれた質問になっていません。"
+                    "会話を一歩進める自然な質問に直してください。"
+                    "会う提案や会話にない店の特徴は加えないでください。"
+                )
+
     # [AI_QUESTION] タグの混入チェック
     for i, rep in enumerate(replies, start=1):
         if "[AI_QUESTION]" in rep:
@@ -4204,10 +5921,15 @@ def validate_candidate_replies(
 
     # Normal mode: verify claims against the last direct personal-experience question.
     if mode == "normal":
+        preference_facts = (
+            personal_desire_facts
+            if strategy_mode == "tapple"
+            else (known_self_facts or [])
+        )
         preference_topics = _personal_preference_question_topics(counterpart_message)
         supported_preferences = {
             topic for topic in preference_topics
-            if any(_fact_supports_preference(fact, topic) for fact in (known_self_facts or []) if fact)
+            if any(_fact_supports_preference(fact, topic) for fact in preference_facts if fact)
         }
         unanswered_preferences = set(preference_topics) - supported_preferences
         if {"犬", "猫"}.issubset(preference_topics) and supported_preferences.intersection({"犬", "猫"}):
@@ -4238,7 +5960,7 @@ def validate_candidate_replies(
                                 topic,
                                 allow_topicless_answer=len(preference_topics) == 1,
                             )
-                            for fact in (known_self_facts or []) if fact
+                            for fact in preference_facts if fact
                         )
                     )
                 }
@@ -4332,6 +6054,17 @@ def validate_candidate_replies(
 
         for i, rep in enumerate(replies, start=1):
             question_counts = naturalness.count_meaningful_questions(rep)
+            if (
+                mode == "normal"
+                and strategy_mode != "tapple"
+                and _has_ungrounded_personal_gratitude(
+                    rep, counterpart_message, chat_history_text
+                )
+            ):
+                violations.append(
+                    f"案{i}で感謝を向ける相手の行動が会話で確認できません。"
+                    "相手の手助けや依頼への応答が確認できない場合、感謝の理由を作らず自然に反応してください。"
+                )
             emotionally_sensitive_share = bool(re.search(
                 r"(?:落ち込|つら|辛い|悲し|不安|しんど|悩ん|自信なく|疲れた|へとへと)",
                 unicodedata.normalize("NFKC", counterpart_message or ""),
@@ -4371,7 +6104,9 @@ def validate_candidate_replies(
             if (
                 counterpart_message
                 and not is_direct_preference_answer
-                and _has_unverified_personal_desire(counterpart_message, rep, known_self_facts)
+                and _has_unverified_personal_desire(
+                    counterpart_message, rep, personal_desire_facts
+                )
             ):
                 violations.append(
                     f"案{i}に本人の未確認の希望を追加しています。"
@@ -4577,6 +6312,17 @@ def validate_candidate_replies(
                 "言い換えではない自然な反応を複数案に含めてください。"
             )
 
+    if (
+        mode == "normal"
+        and strategy_mode != "tapple"
+        and not clarification_only_set
+        and sum(_is_acknowledgment_only(reply) for reply in replies) > 1
+    ):
+        violations.append(
+            "複数案が了承だけの意味で重なっています。"
+            "了承表現の言い換えを並べず、確認できる会話に合う異なる自然な反応を作ってください。"
+        )
+
     # Step 2 仕様変更: 質問なしは正常系。質問の有無はバリデーション対象外とする。
     # （相手からの質問への回答は Prompt の CONVERSATION STATE で指示する）
 
@@ -4740,6 +6486,10 @@ def _validated_gold_copy_salvage_batch(
 
 def _repair_violation_category(violation: str) -> set[str]:
     categories: set[str] = set()
+    if "苦手な活動への誘いに対する意思を明確に伝えていません" in violation:
+        categories.add("unanswered_disliked_activity_invitation")
+    if "本人の苦手な活動への相手の関心を聞き直しています" in violation:
+        categories.add("reasked_disliked_activity_interest")
     if "過去のGold返信をコピーしています" in violation:
         categories.add("gold_reply_copy")
     if "本人の未確認の希望を追加しています" in violation:
@@ -4748,10 +6498,16 @@ def _repair_violation_category(violation: str) -> set[str]:
         categories.add("unsupported_time")
     if "返信案の過半数が相手の発言の言い換え" in violation:
         categories.add("candidate_set_echo")
+    if "複数案が了承だけの意味で重なっています" in violation:
+        categories.add("candidate_acknowledgment_overlap")
+    if "感謝を向ける相手の行動が会話で確認できません" in violation:
+        categories.add("ungrounded_gratitude")
     if "相手の継続的な状況を確認できる情報がありません" in violation:
         categories.add("unsupported_recurrence")
     if "相手の負荷や疲れの理由を確認できる情報がありません" in violation:
         categories.add("unsupported_effort")
+    if "疲れや体調の共有に笑いを添えています" in violation:
+        categories.add("inappropriate_laughter")
     if "同一相手Gold" in violation or "相手の発言を要約・言い換え" in violation:
         categories.add("contact_style")
     if "同一相手Goldより今回の返信候補が短め" in violation:
@@ -4802,6 +6558,11 @@ def _repair_grounding_guidance(categories: frozenset[str]) -> str:
             "根拠のない今日・昨日・明日などの時間表現を削除し、時間を特定しない自然な反応にしてください。"
             "別の日時や、出来事がすでに終わったという前提に置き換えないでください。"
         )
+    if "ungrounded_gratitude" in categories:
+        guidance.append(
+            "感謝を使うのは、相手の手助け・依頼への応答・配慮が会話で確認できる場合だけにしてください。"
+            "確認できない場合は、感謝の理由を推測せず発言の内容へ自然に反応してください。"
+        )
     if "unsupported_recurrence" in categories:
         guidance.append(
             "会話で確認できない毎日・いつも・今週も等の頻度や継続性を示す表現を削除し、"
@@ -4811,6 +6572,11 @@ def _repair_grounding_guidance(categories: frozenset[str]) -> str:
         guidance.append(
             "会話で確認できない負荷の強さや疲れの理由を示す表現を削除し、"
             "確認できる疲れへの短い反応にとどめてください。"
+        )
+    if "inappropriate_laughter" in categories:
+        guidance.append(
+            "相手が疲れや体調の共有に冗談や笑いを含めていないため、返信から『笑』『w』を外し、"
+            "相手の状態を軽く扱わない自然な労いや気遣いにしてください。"
         )
     if guidance:
         guidance.append(
@@ -4840,7 +6606,10 @@ def _repair_output_instruction(
         )
     if strategy_mode == "tapple":
         return _repair_tapple_output_instruction(
-            candidates, tapple_action, strategy_missing=tapple_strategy_missing
+            candidates,
+            tapple_action,
+            strategy_missing=tapple_strategy_missing,
+            categories=categories,
         )
     reply_template = ", ".join(f'"案{index}"' for index in range(1, candidates + 1))
     return (
@@ -4854,7 +6623,21 @@ def _repair_tapple_output_instruction(
     tapple_action: str | None = None,
     *,
     strategy_missing: bool = False,
+    categories: frozenset[str] = frozenset(),
 ) -> str:
+    disliked_invitation_guidance = (
+        "本人が苦手と伝えた活動への直接の誘いに各案で直接答えてください。"
+        "断る場合は本人の苦手意識を短く伝え、相手の誘いを穏やかに断ってください。"
+        "映画など別の話題への質問だけで終わらないでください。"
+        if "unanswered_disliked_activity_invitation" in categories
+        else ""
+    )
+    reasked_disliked_activity_guidance = (
+        "相手がすでに行きたいと伝えた活動について、行きたいか・気になるかを聞き直さないでください。"
+        "本人がその活動を苦手だと話している場合は、本人の好みと相手の希望の両方を踏まえた自然な返事にしてください。"
+        if "reasked_disliked_activity_interest" in categories
+        else ""
+    )
     invite_action_guidance = (
         "strategyのactionを会話全体から再評価し、そのactionと矛盾しない返信候補にしてください。"
         "具体的な活動への近い時期の希望、本人の先行する関心、会話を広げる反応がそろえば、同意扱いせず低圧なinviteを選べます。"
@@ -4879,6 +6662,8 @@ def _repair_tapple_output_instruction(
     )
     return (
         f"不備を修正して返信候補を必ず{candidates}件作成してください。"
+        f"{disliked_invitation_guidance}"
+        f"{reasked_disliked_activity_guidance}"
         f"{_repair_tapple_strategy_guidance(strategy_missing)}"
         f"JSON形式の例: {prompt.format_tapple_output_contract(candidates)}。"
         "actionでinviteを選ぶ場合はinvite_exampleを必ず埋め、返信候補とは別に短く低圧で断りやすい誘い方の例を1つ示してください。"
@@ -4889,8 +6674,8 @@ def _repair_tapple_output_instruction(
         "invite以外のactionではinvite_exampleを必ずnullにしてください。"
         "相手が『近いうちに行ってみたい』など具体的な活動を近い時期にしたいと述べ、共通の活動への関心と会話の相互性がそろい、安全面の懸念や迷いがない場合は、会う同意とは区別したうえでinviteを基本方針として選んでください。明示的に一緒に行きたいと言われるまで待つ必要はありません。短い相づちだけの場合は誘いません。"
         "相手が直前の誘いを受け入れた場合や具体的な代替日を提案した場合は、再度誘うinviteではなくcontinueを選び、日程調整を進めてください。"
-        "直前の誘いを受け入れた場合は、各返信候補で自然に日程調整へ進んでください。都合のよい時期を尋ねるか、『日程はまた相談しよう』のように伝えます。全案を質問にせず、自分の空き日や日時も会話にない限り作らないでください。"
-        "waitまたはstopの返信候補に会う提案を含めず、stopでは将来の誘いや再連絡も提案しないでください。"
+        "直前の誘いを受け入れた場合は、各返信候補で自然に日程調整へ進んでください。都合のよい時期を尋ねるか、『日程はまた相談しよう』のように伝えます。全案を質問にせず、自分の空き日や日時も会話にない限り作らないでください。相手が示した代替日の都合は相手側の空きだけを表し、相手が大丈夫と明言した後は相手の予定を再確認しないでください。各候補で相手の代替日を曜日まで具体的に受け止めてください。たとえば相手が日曜を示したなら『日曜なら』のように各案でその日を明示し、曜日だけの相づちで終わらず次の段取りへ進めてください。本人の日程が確認できていないなら、『日曜なら大丈夫』『行けます』などと自分の空きが決まったように言いながら、同時に予定確認が必要だと述べないでください。『日曜なら自分の予定を確認してみます』のように、確認する側を明確にしてください。候補間で同じ相づちや書き出しをそのまま繰り返さず、自然に反応の焦点を変えてください。話題や気持ちを無理に変えて差を作らないでください。"
+        "waitまたはstopの返信候補に会う提案を含めず、stopでは将来の誘いや再連絡も提案しないでください。相手が断った後、本人がすでに断りを受け止めて相手も短く同意している場合は、直近の相づちを返信の冒頭で繰り返さず、質問や新しい話題を足さない短い締めにしてください。本人がすでに『無理に誘わない』と伝えている場合は、その約束を言い換えてもう一度説明しないでください。感謝や気遣いは、履歴にある断りを伝えてくれたことなど、実際の相手の言葉に向けてください。相手がしていない気遣いへのお礼や、理由のない謝罪を作らないでください。相手が最後に短く同意しただけなら、短い相づちや『わかりました』だけで返さず、履歴に沿った感謝か気遣いを添えて自然に会話を閉じてください。"
         f"{invite_action_guidance}"
         "相手が挙げた活動や話題に直接つながる返信にし、無難な一般論へずらさないでください。会話にない店の特徴・周辺の変化や自分の習慣を付け足さず、自然な短い反応を不必要にEcho扱いしないでください。"
         "相手が場所や活動に関心を示したときは、直前の自分の発言にある関心や具体的な話題と結びつけてください。訪問した事実がないのに店の雰囲気を知っているように述べず、相手の希望を一緒に行く約束へ読み替えないでください。"
@@ -4904,7 +6689,7 @@ def _repair_tapple_strategy_guidance(strategy_missing: bool) -> str:
     if strategy_missing:
         return (
             "strategyの欠落は出力形式の不備であり、根拠不足を意味しません。欠落だけを理由にwaitまたはcontinueへ固定せず、"
-            "会話全体を読み直してactionを選び、evidenceには相手の発言の完全一致抜粋を入れてください。"
+            "会話全体を読み直してactionを選び、evidenceには最新の相手発言から完全一致の短い抜粋を入れてください。以前の発言も判断に使う場合はrationaleで説明してください。"
             "明示的な断り・迷い・安全上の懸念があればinviteを選ばず、会話上の根拠が実際に足りない場合に限りwaitまたはclarifyにしてください。"
             "repliesとstrategyは両方必須です。"
         )
@@ -5012,6 +6797,12 @@ def _build_repair_messages(
         if "candidate_set_echo" in categories
         else ""
     )
+    acknowledgment_guidance = (
+        "了承だけの表現を複数案で言い換えないでください。"
+        "確認できる会話に合わせて自然に異なる反応を作り、未確認の手助けや状況を足さないでください。"
+        if "candidate_acknowledgment_overlap" in categories
+        else ""
+    )
     repair_instruction = (
         f"前回の出力に以下の不備が検知されました。\n"
         f"【不備内容】\n"
@@ -5019,6 +6810,7 @@ def _build_repair_messages(
         f"{output_instruction}\n"
         f"{grounding_guidance}"
         f"{echo_set_guidance}"
+        f"{acknowledgment_guidance}"
         f"{repair_guidance}"
     )
     return [
@@ -7063,6 +8855,26 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
             candidates=body.candidates,
             strategy_mode=body.strategy_mode,
         )
+    if (
+        body.mode == "normal"
+        and body.strategy_mode != "tapple"
+        and body.candidates > 1
+        and _needs_context_for_standalone_acknowledgment(
+            ctx.get("last_contact_msg", ""), ctx.get("chat_text", "")
+        )
+    ):
+        msgs = [
+            *msgs,
+            {
+                "role": "user",
+                "content": (
+                    "会話履歴に直前の自分の発言がなく、相手の最新発言も短い了承だけです。"
+                    "何を了承したのか分からないため、送信する返信候補は作らないでください。"
+                    "アプリ利用者に、了承の前に自分が送った内容を教えてもらう確認を一つだけ行ってください。"
+                    "出力は [AI_QUESTION]質問[/AI_QUESTION] の形式だけにしてください。"
+                ),
+            },
+        ]
 
     def _call_ai(messages: list[dict[str, str]]) -> str:
         nonlocal active_provider, active_cfg, using_fallback
@@ -7285,6 +9097,8 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
     contact_style_issue_cache: dict[tuple[str, ...], list[str]] = {}
     style_repair_api_attempted = False
     last_violations = []
+    saw_disliked_activity_invitation_violation = False
+    saw_disliked_activity_interest_violation = False
     gold_copy_candidate_pool: list[str] = []
     salvage_validation_kwargs: dict[str, Any] | None = None
 
@@ -7355,6 +9169,20 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
         )
         if body.strategy_mode == "tapple":
             violations.extend(_tapple_strategy_output_violations(tapple_strategy))
+        saw_disliked_activity_invitation_violation = (
+            saw_disliked_activity_invitation_violation
+            or any(
+                "苦手な活動への誘いに対する意思を明確に伝えていません" in violation
+                for violation in violations
+            )
+        )
+        saw_disliked_activity_interest_violation = (
+            saw_disliked_activity_interest_violation
+            or any(
+                "本人の苦手意識を伝えた活動に肯定的に同調しています" in violation
+                for violation in violations
+            )
+        )
 
         if (
             not violations
@@ -7483,6 +9311,22 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
                         conversation_messages=ctx.get("chat_messages", []),
                         style_reference_replies=ctx.get("style_reference_replies", []),
                     )
+                    saw_disliked_activity_invitation_violation = (
+                        saw_disliked_activity_invitation_violation
+                        or any(
+                            "苦手な活動への誘いに対する意思を明確に伝えていません"
+                            in violation
+                            for violation in repair_violations
+                        )
+                    )
+                    saw_disliked_activity_interest_violation = (
+                        saw_disliked_activity_interest_violation
+                        or any(
+                            "本人の苦手意識を伝えた活動に肯定的に同調しています"
+                            in violation
+                            for violation in repair_violations
+                        )
+                    )
             style_baseline_is_current_repair = False
             if (
                 not repair_violations
@@ -7599,6 +9443,37 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
             logger.warning("Attempt %d repair AI call failed: %s. Rejecting all and retrying clean...", attempt, exc)
             last_violations = violations
 
+    if not final_parsed_replies and body.strategy_mode == "tapple":
+        schedule_check_fallbacks = _build_tapple_counterproposal_schedule_check_fallbacks(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if schedule_check_fallbacks:
+            final_parsed_replies = schedule_check_fallbacks
+            final_strategy_raw = None
+            logger.info(
+                "Returning %d hard-validated Tapple date-check replies after model retries were exhausted",
+                len(schedule_check_fallbacks),
+            )
+
+    if not final_parsed_replies and body.strategy_mode == "tapple":
+        low_reciprocity_fallback = _build_tapple_low_reciprocity_echo_fallback(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if low_reciprocity_fallback:
+            low_reciprocity_replies, low_reciprocity_strategy = low_reciprocity_fallback
+            final_parsed_replies = low_reciprocity_replies
+            final_strategy_raw = json.dumps(
+                {
+                    "replies": low_reciprocity_replies,
+                    "strategy": low_reciprocity_strategy.model_dump(),
+                },
+                ensure_ascii=False,
+            )
+            logger.info(
+                "Returning %d hard-validated Tapple low-reciprocity replies after model retries were exhausted",
+                len(low_reciprocity_replies),
+            )
+
     # Hard validation を通過した候補がない場合、不正候補を成功扱いで返さない。
     if not final_parsed_replies and style_only_fallback_replies:
         logger.info("Soft contact-style repair did not produce a replacement; returning the hard-valid initial replies")
@@ -7626,6 +9501,90 @@ def _generate_with_batch_tracking(body: GenerateRequest, batch_state: dict[str, 
             logger.info(
                 "Returning %d candidates from the request-local Gold-copy salvage pool after full batch validation",
                 len(salvaged_replies),
+            )
+
+    if (
+        not final_parsed_replies
+        and body.strategy_mode == "tapple"
+        and saw_disliked_activity_invitation_violation
+    ):
+        boundary_fallback_replies = _build_tapple_disliked_activity_decline_fallbacks(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if boundary_fallback_replies:
+            final_parsed_replies = boundary_fallback_replies
+            final_strategy_raw = None
+            logger.info(
+                "Returning %d hard-validated Tapple boundary replies after model retries were exhausted",
+                len(boundary_fallback_replies),
+            )
+
+    if (
+        not final_parsed_replies
+        and body.strategy_mode == "tapple"
+        and saw_disliked_activity_interest_violation
+    ):
+        interest_fallback_replies = _build_tapple_disliked_activity_interest_fallbacks(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if interest_fallback_replies:
+            final_parsed_replies = interest_fallback_replies
+            final_strategy_raw = None
+            logger.info(
+                "Returning %d hard-validated Tapple activity-interest replies after model retries were exhausted",
+                len(interest_fallback_replies),
+            )
+
+    if not final_parsed_replies and body.strategy_mode == "tapple":
+        decline_closing_fallbacks = (
+            _build_tapple_acknowledged_decline_closing_fallbacks(
+                ctx.get("chat_messages", []), body.candidates
+            )
+        )
+        if decline_closing_fallbacks:
+            final_parsed_replies = decline_closing_fallbacks
+            final_strategy_raw = None
+            logger.info(
+                "Returning %d hard-validated Tapple decline-closing replies after model retries were exhausted",
+                len(decline_closing_fallbacks),
+            )
+
+    if not final_parsed_replies and body.strategy_mode == "tapple":
+        low_engagement_fallback = _build_tapple_low_engagement_closing_fallbacks(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if low_engagement_fallback:
+            low_engagement_replies, low_engagement_strategy = low_engagement_fallback
+            final_parsed_replies = low_engagement_replies
+            final_strategy_raw = json.dumps(
+                {
+                    "replies": low_engagement_replies,
+                    "strategy": low_engagement_strategy.model_dump(),
+                },
+                ensure_ascii=False,
+            )
+            logger.info(
+                "Returning %d hard-validated Tapple low-engagement closings after model retries were exhausted",
+                len(low_engagement_replies),
+            )
+
+    if not final_parsed_replies and body.strategy_mode == "tapple":
+        shared_interest_fallback = _build_tapple_shared_interest_invite_fallback(
+            ctx.get("chat_messages", []), body.candidates
+        )
+        if shared_interest_fallback:
+            shared_interest_replies, shared_interest_strategy = shared_interest_fallback
+            final_parsed_replies = shared_interest_replies
+            final_strategy_raw = json.dumps(
+                {
+                    "replies": shared_interest_replies,
+                    "strategy": shared_interest_strategy.model_dump(),
+                },
+                ensure_ascii=False,
+            )
+            logger.info(
+                "Returning %d hard-validated Tapple shared-interest invitation replies after model retries were exhausted",
+                len(shared_interest_replies),
             )
 
     if not final_parsed_replies:

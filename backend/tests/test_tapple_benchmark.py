@@ -38,12 +38,12 @@ def _valid_results():
         "unlisted_shared_hobby": [
             "よかったら今度、一緒にボルダリングを体験してみませんか？",
             "最近始めたボルダリング、よかったら一緒にやってみませんか？",
-            "ボルダリング楽しそうですね！近くのジムで一緒に体験してみませんか？",
+            "ボルダリング楽しそうですね！よかったら今度一緒に体験してみませんか？",
         ],
         "shared_activity_low_reciprocity": [
-            "パンケーキのお店、気になりますね！",
-            "パンケーキのお店、おいしそうですね。まずは写真を見てみたいです",
-            "駅前のカフェも気になってたんですね！",
+            "パンケーキって、ふわふわ系としっかり系ならどちらが好みですか？",
+            "パンケーキのお店を選ぶなら、雰囲気とメニューどちらを重視しますか？",
+            "近いうちに行くなら、どんなパンケーキのお店が気になりますか？",
         ],
         "accepted_invitation": [
             "楽しみです！日程はいつ頃が都合よさそうですか？",
@@ -73,11 +73,11 @@ def _valid_results():
         "meeting_hesitation": [
             "そうですね、急がずメッセージで話せたらうれしいです",
             "迷う気持ちを話してくれてありがとう。焦らずゆっくり話しましょう",
-            "無理せず、自分のペースで大丈夫ですよ",
+            "会うことは急がなくて大丈夫です。自分のペースで話しましょう",
         ],
         "meeting_safety_concern": [
             "安全面が不安なのは自然だと思います。無理せずここで話しましょう",
-            "不安な気持ちを伝えてくれてありがとう。安心できるペースで大丈夫です",
+            "会う前の不安を話してくれてありがとう。安心できるペースで大丈夫です",
             "焦らずメッセージでやりとりしましょう。少しずつ安心できたらいいですね",
         ],
         "declining_engagement": [
@@ -91,9 +91,14 @@ def _valid_results():
             "カフェのお店なんですね。前に話していたプリンも置いてあるんでしょうか？",
         ],
         "different_activity_does_not_clear_disinterest": [
-            "映画が好きなんですね！最近観て印象に残った作品ありますか？",
-            "映画いいですね、最近なにか観ましたか？",
-            "どんなジャンルの映画をよく観ますか？",
+            "カフェは苦手なので、今回は遠慮します。",
+            "カフェは苦手です。今回はやめておきます。",
+            "カフェは苦手なので、今回は難しいです。",
+        ],
+        "counterproposal": [
+            "日曜なら、私も予定を確認してみますね。時間はまた相談しましょう。",
+            "日曜ならこちらの都合を確認して、何時ごろにするか相談したいです。",
+            "日曜なら都合が合うか確認して、あとで連絡しますね。",
         ],
     }
     results = []
@@ -374,6 +379,48 @@ def test_accepted_invitation_scenario_expects_scheduling_not_another_invitation(
 
     assert accepted["allowed_actions"] == ["continue"]
     assert accepted["no_reinvitation"] is True
+
+
+def test_accepted_invitation_acknowledgment_with_schedule_is_not_counted_as_reinvitation():
+    accepted = next(
+        scenario for scenario in SCENARIOS if scenario["id"] == "accepted_invitation"
+    )
+    result = {
+        "strategy": {
+            "action": "continue",
+            "rationale": "相手が誘いを受け入れたので日程を調整します。",
+            "evidence": [accepted["messages"][-1]["content"]],
+            "invite_example": None,
+        },
+        "replies": [
+            "ぜひ行きましょう！週末など空いてる日はありますか？",
+            "嬉しいです！いつ頃が都合いいですか？",
+            "ありがとうございます。日程を相談しましょう！",
+        ],
+    }
+
+    assert not _evaluate_result(accepted, result)
+
+
+def test_accepted_invitation_does_not_allow_a_second_explicit_invitation_with_schedule():
+    accepted = next(
+        scenario for scenario in SCENARIOS if scenario["id"] == "accepted_invitation"
+    )
+    result = {
+        "strategy": {
+            "action": "continue",
+            "rationale": "相手が誘いを受け入れたので日程を調整します。",
+            "evidence": [accepted["messages"][-1]["content"]],
+            "invite_example": None,
+        },
+        "replies": [
+            "よかったら今度も一緒にカフェに行きませんか？週末は空いていますか？",
+            "嬉しいです！いつ頃が都合いいですか？",
+            "ありがとうございます。日程を相談しましょう！",
+        ],
+    }
+
+    assert "reinvitation_not_allowed" in _evaluate_result(accepted, result)
 
 
 def test_tapple_benchmark_rejects_missing_reply_or_unverifiable_evidence():

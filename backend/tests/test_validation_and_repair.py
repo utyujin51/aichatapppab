@@ -95,6 +95,98 @@ def test_hard_validator_detects_violations():
     assert generation.validate_candidate_replies(v_no_q, 3, condition="質問しない") == []
 
 
+def test_hard_validator_rejects_unnatural_otsukaresama_desune_for_tired_contact():
+    assert any(
+        "不自然" in violation
+        for violation in generation.validate_candidate_replies(
+            ["お疲れ様ですね！"],
+            1,
+            counterpart_message="仕事で疲れた",
+        )
+    )
+    assert generation.validate_candidate_replies(
+        ["お疲れ様です！"],
+        1,
+        counterpart_message="仕事で疲れた",
+    ) == []
+
+
+def test_hard_validator_rejects_laughter_when_tired_contact_did_not_use_humor():
+    violations = generation.validate_candidate_replies(
+        ["おつかれ笑"],
+        1,
+        counterpart_message="仕事で疲れた",
+    )
+    assert any("疲れや体調の共有に笑いを添えています" in violation for violation in violations)
+    assert generation.validate_candidate_replies(
+        ["おつかれ笑"],
+        1,
+        counterpart_message="仕事で疲れた笑",
+    ) == []
+    for counterpart_message in (
+        "仕事で疲れたけど、動画を見て笑えなかった",
+        "仕事で疲れたけど、別の動画を見て笑った",
+    ):
+        assert any(
+            "疲れや体調の共有に笑いを添えています" in violation
+            for violation in generation.validate_candidate_replies(
+                ["おつかれ笑"],
+                1,
+                counterpart_message=counterpart_message,
+            )
+        )
+    assert generation.validate_candidate_replies(
+        ["それならよかった、元気そうで何より笑"],
+        1,
+        counterpart_message="今日は疲れてないよ。元気！",
+    ) == []
+    assert any(
+        "疲れや体調の共有に笑いを添えています" in violation
+        for violation in generation.validate_candidate_replies(
+            ["それならよかった、元気そうで何より笑"],
+            1,
+            counterpart_message="疲れてないわけではないよ",
+        )
+    )
+    for counterpart_message in (
+        "体調が悪いわけじゃないよ",
+        "体調は悪くないよ",
+        "具合は悪くないよ",
+        "体調は大丈夫だよ",
+        "体調は問題ないよ",
+        "具合は平気だよ",
+        "疲れてるわけじゃないよ",
+        "疲れたってほどじゃないよ",
+        "疲れたとは言えないよ",
+    ):
+        assert generation.validate_candidate_replies(
+            ["それならよかった、元気そうで何より笑"],
+            1,
+            counterpart_message=counterpart_message,
+        ) == []
+    for counterpart_message in (
+        "体調は大丈夫じゃないよ",
+        "体調は大丈夫ではないよ",
+        "体調は大丈夫とは言えないよ",
+        "体調は良くないよ",
+        "体調は悪くないわけではないよ",
+        "体調は問題ないわけではないよ",
+        "疲れたとは言えないわけではないよ",
+    ):
+        assert any(
+            "疲れや体調の共有に笑いを添えています" in violation
+            for violation in generation.validate_candidate_replies(
+                ["それならよかった、元気そうで何より笑"],
+                1,
+                counterpart_message=counterpart_message,
+            )
+        )
+    assert generation.validate_candidate_replies(
+        ["お疲れ様です！"],
+        1,
+        counterpart_message="仕事で疲れた",
+    ) == []
+
 def test_validator_rejects_long_gold_reply_copies_but_allows_short_common_phrases():
     gold_reply = "今日はありがとう！お店もすごくよかったし、またゆっくり話せて楽しかった！"
     copied_with_punctuation_changes = "今日はありがとう、お店もすごくよかったしまたゆっくり話せて楽しかった！"
@@ -487,6 +579,94 @@ def test_normal_validator_matches_preference_claims_to_the_supported_user_fact()
         counterpart_message="映画好き？甘いもの大丈夫？", known_self_facts=["甘いものが大丈夫です"],
     )
     assert any("本人の好みを確認できる情報がありません" in e for e in multiple_preferences)
+
+
+def test_tapple_latest_self_statement_updates_each_preference_topic():
+    violations = generation.validate_candidate_replies(
+        ["僕も映画好きです！"],
+        expected_candidates=1,
+        mode="normal",
+        strategy_mode="tapple",
+        counterpart_message="映画好き？",
+        known_self_facts=["猫が好きです。映画は苦手です"],
+        conversation_messages=[
+            {"sender": "self", "content": "猫は好きです。映画も好きです。"},
+            {"sender": "contact", "content": "映画に行きませんか？"},
+        ],
+    )
+
+    latest_topics = generation._personal_desire_topics("猫は好きです。映画も好きです。")
+    assert any(generation._topics_overlap("映画", topic) for topic in latest_topics)
+    assert not any("本人の未確認の希望を追加しています" in error for error in violations)
+    assert generation._latest_preference_polarity(
+        "映画は苦手だったけど、今は好きです", "映画"
+    ) == "positive"
+    assert generation._latest_preference_polarity(
+        "カフェは苦手だったけど、今は好きです。あなたは？", "カフェ"
+    ) == "positive"
+    assert generation._latest_preference_polarity(
+        "カフェは苦手だったけど、今は好きです、あなたはどう？", "カフェ"
+    ) == "positive"
+    assert generation._latest_preference_polarity(
+        "カフェは苦手だけど、映画好きです", "カフェ"
+    ) == "negative"
+    assert generation._latest_preference_polarity(
+        "カフェは苦手だけど、あなたはカフェ好きですか？", "カフェ"
+    ) == "negative"
+    assert generation._latest_preference_polarity(
+        "カフェは苦手だけど、彼氏はカフェ好きです", "カフェ"
+    ) == "negative"
+
+
+def test_tapple_later_explicit_preference_topic_does_not_override_earlier_topic():
+    violations = generation.validate_candidate_replies(
+        ["僕もカフェ好きです！"],
+        expected_candidates=1,
+        mode="normal",
+        strategy_mode="tapple",
+        counterpart_message="今度一緒にカフェに行きたいです",
+        known_self_facts=["カフェが好きです"],
+        conversation_messages=[
+            {"sender": "self", "content": "カフェは苦手だけど、映画好きです"},
+            {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+        ],
+    )
+
+    assert any("本人の未確認の希望を追加しています" in error for error in violations)
+
+
+def test_tapple_latest_correction_supports_current_preference_answer():
+    violations = generation.validate_candidate_replies(
+        ["僕も映画好きです！"],
+        expected_candidates=1,
+        mode="normal",
+        strategy_mode="tapple",
+        counterpart_message="映画好き？",
+        known_self_facts=["映画は苦手です"],
+        conversation_messages=[
+            {"sender": "self", "content": "映画は苦手だったけど、今は好きです"},
+            {"sender": "contact", "content": "映画好き？"},
+        ],
+    )
+
+    assert not any("本人の好みを確認できる情報がありません" in error for error in violations)
+
+
+def test_tapple_question_about_contact_does_not_override_self_preference():
+    violations = generation.validate_candidate_replies(
+        ["僕もカフェ好きです！"],
+        expected_candidates=1,
+        mode="normal",
+        strategy_mode="tapple",
+        counterpart_message="今度一緒にカフェに行きたいです",
+        known_self_facts=["カフェが好きです"],
+        conversation_messages=[
+            {"sender": "self", "content": "カフェは苦手だけど、あなたはカフェ好きですか？"},
+            {"sender": "contact", "content": "今度一緒にカフェに行きたいです"},
+        ],
+    )
+
+    assert any("本人の未確認の希望を追加しています" in error for error in violations)
 
 
 def test_normal_validator_requires_movie_preference_fact():
@@ -997,6 +1177,94 @@ def test_normal_validator_rejects_unverified_personal_habit_claim():
     ) == []
 
 
+def test_normal_validator_rejects_unverified_recent_self_care_claim():
+    reply = "ダイエット始めたんですね！僕も最近は気をつけてます笑応援してます！"
+
+    violations = generation.validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        mode="normal",
+        counterpart_message="ダイエット始めた",
+        known_self_facts=[],
+    )
+
+    assert any("本人の未確認の習慣・傾向を追加しています" in error for error in violations)
+
+
+def test_normal_validator_allows_grounded_recent_self_care_claim():
+    reply = "ダイエット始めたんですね！僕も最近は気をつけてます笑応援してます！"
+
+    violations = generation.validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        mode="normal",
+        counterpart_message="ダイエット始めた",
+        known_self_facts=["僕も最近は気をつけています"],
+    )
+
+    assert not any("本人の未確認の習慣・傾向を追加しています" in error for error in violations)
+
+    labeled_fact_violations = generation.validate_candidate_replies(
+        [reply], expected_candidates=1, mode="normal",
+        counterpart_message="ダイエット始めた",
+        known_self_facts=["自分: 僕も最近は気をつけています"],
+    )
+    assert not any("本人の未確認の習慣・傾向を追加しています" in error for error in labeled_fact_violations)
+
+    multi_sentence_fact_violations = generation.validate_candidate_replies(
+        [reply], expected_candidates=1, mode="normal",
+        counterpart_message="ダイエット始めた",
+        known_self_facts=["自分: 僕も最近は気をつけています。健康診断も受けています。"],
+    )
+    assert not any("本人の未確認の習慣・傾向を追加しています" in error for error in multi_sentence_fact_violations)
+
+
+def test_normal_validator_matches_habit_fact_after_comma():
+    violations = generation.validate_candidate_replies(
+        ["僕もよくカフェに行きます"],
+        expected_candidates=1,
+        mode="normal",
+        counterpart_message="カフェ巡りが好きです",
+        known_self_facts=["自分: カフェによく行きます、映画もよく見ます"],
+    )
+
+    assert not any("本人の未確認の習慣・傾向を追加しています" in error for error in violations)
+
+
+def test_normal_validator_does_not_generalize_specific_self_care_fact():
+    reply = "ダイエット始めたんですね！僕も最近は気をつけてます笑応援してます！"
+
+    violations = generation.validate_candidate_replies(
+        [reply],
+        expected_candidates=1,
+        mode="normal",
+        counterpart_message="ダイエット始めた",
+        known_self_facts=["食事に気をつけています", "紫外線に気をつけています"],
+    )
+
+    assert any("本人の未確認の習慣・傾向を追加しています" in error for error in violations)
+
+    unrelated_experience = generation.validate_candidate_replies(
+        ["僕もよく寿司屋に行きます"], expected_candidates=1, mode="normal",
+        counterpart_message="最近寿司を食べたよ", known_self_facts=[],
+    )
+    assert any("本人の未確認の習慣・傾向を追加しています" in error for error in unrelated_experience)
+
+    unrelated_followup_experience = generation.validate_candidate_replies(
+        ["ありますよ。僕もよくカフェに行きます"], expected_candidates=1, mode="normal",
+        counterpart_message="寿司屋って行ったことある？",
+        known_self_facts=["自分: 寿司屋には行ったことがあります"],
+    )
+    assert any("本人の未確認の習慣・傾向を追加しています" in error for error in unrelated_followup_experience)
+
+    comma_separated_unverified_habit = generation.validate_candidate_replies(
+        ["僕もよく寿司屋に行きます、映画もよく見ます"], expected_candidates=1, mode="normal",
+        counterpart_message="寿司屋って行ったことある？",
+        known_self_facts=["自分: 寿司屋によく行きます"],
+    )
+    assert any("本人の未確認の習慣・傾向を追加しています" in error for error in comma_separated_unverified_habit)
+
+
 def test_normal_validator_limits_unnecessary_multi_question_candidates():
     violations = generation.validate_candidate_replies(
         ["大丈夫ですか？\nなにか嫌なことがあったんですか？"], expected_candidates=1,
@@ -1242,6 +1510,130 @@ def test_normal_validator_allows_work_acknowledgment_when_counterpart_says_they_
         counterpart_message="今日は働いていました", known_self_facts=[],
         chat_history_text="相手: 今日は働いていました",
     ) == []
+
+
+def test_normal_validator_rejects_unprompted_gratitude_without_context():
+    violations = generation.validate_candidate_replies(
+        ["ありがとうございます！"], expected_candidates=1, mode="normal",
+        counterpart_message="了解", known_self_facts=[],
+        chat_history_text="相手: 了解",
+    )
+
+    assert any("感謝を向ける相手の行動が会話で確認できません" in error for error in violations)
+
+
+def test_normal_validator_allows_gratitude_when_context_shows_help_or_request():
+    assert generation.validate_candidate_replies(
+        ["ありがとうございます！"], expected_candidates=1, mode="normal",
+        counterpart_message="任せて！", known_self_facts=[],
+        chat_history_text="相手: 任せて！",
+    ) == []
+
+
+def test_normal_validator_does_not_treat_negated_help_as_gratitude_context():
+    for counterpart_message in ("手伝ってくれなかったので困った", "手伝えなくてごめん"):
+        violations = generation.validate_candidate_replies(
+            ["ありがとうございます！"], expected_candidates=1, mode="normal",
+            counterpart_message=counterpart_message, known_self_facts=[],
+            chat_history_text=f"相手: {counterpart_message}",
+        )
+        assert any("感謝を向ける相手の行動が会話で確認できません" in error for error in violations)
+
+
+def test_normal_validator_allows_gratitude_for_reassurance():
+    assert generation.validate_candidate_replies(
+        ["ありがとうございます！"], expected_candidates=1, mode="normal",
+        counterpart_message="心配しないで", known_self_facts=[],
+        chat_history_text="相手: 心配しないで",
+    ) == []
+
+
+def test_normal_validator_keeps_positive_help_before_negated_other_action():
+    for counterpart_message in (
+        "説明してくれたけど資料を送ってくれなかった",
+        "説明してくれたのに資料を送ってくれなかった",
+    ):
+        assert generation.validate_candidate_replies(
+            ["ありがとうございます！"], expected_candidates=1, mode="normal",
+            counterpart_message=counterpart_message, known_self_facts=[],
+            chat_history_text=f"相手: {counterpart_message}",
+        ) == []
+
+    assert generation.validate_candidate_replies(
+        ["ありがとうございます！"], expected_candidates=1, mode="normal",
+        counterpart_message="了解", known_self_facts=[],
+        chat_history_text="自分: これ手伝ってくれない？\n相手: 了解",
+    ) == []
+
+
+def test_normal_validator_rejects_duplicate_acknowledgment_only_candidate_set():
+    violations = generation.validate_candidate_replies(
+        ["了解です！", "承知しました！", "ありがとうございます！"],
+        expected_candidates=3, mode="normal", counterpart_message="OK",
+        known_self_facts=[], chat_history_text="相手: OK",
+    )
+
+    assert any("複数案が了承だけの意味で重なっています" in error for error in violations)
+
+
+def test_normal_validator_rejects_comma_joined_acknowledgment_only_candidate_set():
+    violations = generation.validate_candidate_replies(
+        ["はい、わかりました！", "うん、分かりました！"],
+        expected_candidates=2, mode="normal", counterpart_message="OK",
+        known_self_facts=[], chat_history_text="相手: OK",
+    )
+
+    assert any("複数案が了承だけの意味で重なっています" in error for error in violations)
+
+
+def test_normal_validator_rejects_honorific_and_synonym_acknowledgment_overlap():
+    for replies in (
+        ["了解しました！", "わかりました！", "承知いたしました！"],
+        ["なるほど、そうなんですね！", "了解です！", "把握しました！"],
+    ):
+        violations = generation.validate_candidate_replies(
+            replies, expected_candidates=3, mode="normal", counterpart_message="了解",
+            known_self_facts=[], chat_history_text="相手: 了解",
+        )
+        assert any("複数案が了承だけの意味で重なっています" in error for error in violations)
+
+
+def test_acknowledgment_only_parser_does_not_ignore_substantive_follow_up():
+    assert not generation._is_acknowledgment_only("了解です！何かあったんですか？")
+    assert generation._is_acknowledgment_only("はい、わかりました！")
+    assert generation._is_acknowledgment_only("うん、分かりました！")
+    assert generation._is_acknowledgment_only("承知いたしました！")
+    assert generation._is_acknowledgment_only("なるほど、そうなんですね！")
+    assert generation._is_acknowledgment_only("把握しました！")
+    assert not generation._is_acknowledgment_only("いいですね！")
+
+
+def test_standalone_acknowledgment_requests_missing_context_only_when_history_lacks_self_message():
+    assert generation._needs_context_for_standalone_acknowledgment(
+        "了解", "相手: 了解"
+    )
+    assert generation._needs_context_for_standalone_acknowledgment(
+        "いいよ", "相手: いいよ"
+    )
+    assert not generation._needs_context_for_standalone_acknowledgment(
+        "了解", "自分: これお願いできる？\n相手: 了解"
+    )
+    assert generation._needs_context_for_standalone_acknowledgment(
+        "了解", "自分: 映画が好きです\n相手: 今日は忙しかった\n相手: 了解"
+    )
+    assert not generation._needs_context_for_standalone_acknowledgment(
+        "了解、そうしておくね", "相手: 了解、そうしておくね"
+    )
+
+
+def test_normal_validator_allows_single_acknowledgment_with_different_reply_functions():
+    violations = generation.validate_candidate_replies(
+        ["了解です！", "ありがとうございます！", "どちらがよさそうですか？"],
+        expected_candidates=3, mode="normal", counterpart_message="どっちがいい？",
+        known_self_facts=[], chat_history_text="相手: どっちがいい？",
+    )
+
+    assert not any("複数案が了承だけの意味で重なっています" in error for error in violations)
 
 
 def test_normal_validator_does_not_ground_counterpart_work_from_self_history():
@@ -1519,6 +1911,28 @@ def test_unsupported_time_violation_gets_time_specific_repair_guidance():
     repair_prompt = messages[-1]["content"]
     assert "根拠のない今日・昨日・明日などの時間表現を削除" in repair_prompt
     assert "別の日時や、出来事がすでに終わったという前提に置き換えない" in repair_prompt
+
+
+def test_tapple_disliked_activity_invitation_gets_direct_response_repair_guidance():
+    violation = (
+        "案1が本人の苦手な活動への誘いに対する意思を明確に伝えていません。"
+        "話題をずらして終わらせず、本人の好みを尊重した断りや返答をしてください。"
+    )
+    categories = generation._repair_violation_categories([violation])
+    messages = generation._build_repair_messages(
+        [{"role": "system", "content": "返信を作って"}],
+        '{"replies": ["どんな映画が好きなんですか？"]}',
+        [violation],
+        1,
+        strategy_mode="tapple",
+        tapple_action="wait",
+    )
+
+    assert "unanswered_disliked_activity_invitation" in categories
+    repair_prompt = messages[-1]["content"]
+    assert "苦手と伝えた活動への直接の誘いに各案で直接答えてください" in repair_prompt
+    assert "断る場合は本人の苦手意識を短く伝え" in repair_prompt
+    assert "映画など別の話題への質問だけで終わらない" in repair_prompt
 
 
 def test_normal_validator_allows_today_recurrence_when_counterpart_says_today_too():

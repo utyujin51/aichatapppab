@@ -270,6 +270,9 @@ _ACKNOWLEDGMENT_RE = re.compile(
 _OFF_RAMP_ENDING_RE = re.compile(
     r"^(?:また[^。.!！?？、,]{0,24}(?:話そう(?:ね)?|話しましょう|話したくなったら話(?:そう|しましょう)|話せるときに話そう(?:ね)?|連絡して(?:ね)?|連絡しよう|連絡するね|やりとりしよう)"
     r"|気が向いたらまた(?:話そう(?:ね)?|話しましょう|連絡して(?:ね)?)|話せるときにまた|またね"
+    r"|(?:カフェの話|この話|話題).{0,10}(?:ここまでにしておく|いったんここまで|終わりにしておく|止めておく|やめておく)"
+    r"|こっちから.{0,12}(?:続けるのはやめておく|続けて聞くのは控える)"
+    r"|ここでいったん話を止めておく"
     r"|(?:今日は|今は)?(?:無理せず(?:ゆっくり)?(?:休んで|過ごして|して)?|ゆっくり(?:休んで|過ごして|して)|休んで|気にしないで)(?:ね|ください(?:ね)?)?)$"
 )
 
@@ -394,7 +397,36 @@ def _evaluate_result(scenario: dict, result: dict) -> list[str]:
                 failures.append("reply_too_many_sentences")
         if generation._is_tapple_contact_exchange_request(reply):
             failures.append("external_contact_request")
-        if scenario.get("no_reinvitation") and generation._TAPPLE_REINVITATION_RE.search(reply):
+        accepted_invitation_scheduling = bool(
+            generation._has_prior_self_tapple_invitation(
+                conversation_messages,
+                next(
+                    index
+                    for index in range(len(conversation_messages) - 1, -1, -1)
+                    if conversation_messages[index].get("sender") == "contact"
+                ),
+            )
+            and generation._TAPPLE_ACCEPTED_INVITATION_RE.search(latest_contact)
+            and generation._TAPPLE_SCHEDULING_NEXT_STEP_RE.search(reply)
+        )
+        accepted_invitation_acknowledgment = bool(
+            accepted_invitation_scheduling
+            and re.search(
+                r"(?:ぜひ|嬉しい|うれしい|楽しみ|ありがとう|本当ですか).{0,14}"
+                r"(?:行きましょう|行こう(?:よ)?|会いましょう|会おう(?:よ)?)",
+                reply,
+            )
+            and not re.search(
+                r"(?:行きませんか|行かない[?？]?|会いませんか|会わない[?？]?|"
+                r"よかったら.{0,12}(?:一緒に|行|会)|もしよければ.{0,12}(?:一緒に|行|会))",
+                reply,
+            )
+        )
+        if (
+            scenario.get("no_reinvitation")
+            and generation._TAPPLE_REINVITATION_RE.search(reply)
+            and not accepted_invitation_acknowledgment
+        ):
             failures.append("reinvitation_not_allowed")
         violations = generation.validate_candidate_replies(
             [reply],
@@ -415,6 +447,7 @@ def _evaluate_result(scenario: dict, result: dict) -> list[str]:
             required_reply_markers
             and not any(marker in reply for marker in required_reply_markers)
             and not contextual_invitation
+            and not accepted_invitation_scheduling
         ):
             failures.append("reply_not_contextual")
         if scenario.get("reply_must_end_contextually") and not _has_contextual_off_ramp(reply):

@@ -47,8 +47,8 @@ def test_contact_benchmark_generates_same_probe_with_contact_specific_gold_conte
             system_prompt = messages[0]["content"]
             if "自分（手入力正解）: 新作気になる笑" in system_prompt:
                 replies = [
-                    "仕事おつかれ、しんどいよね笑",
-                    "それは疲れるよね、ほんとおつかれ笑",
+                    "仕事おつかれ、しんどいよね",
+                    "それは疲れるよね、ほんとおつかれ",
                     "仕事って疲れるよね",
                 ]
             elif "自分（手入力正解）: 新作スイーツ気になりますね！美味しそうですね。" in system_prompt:
@@ -194,8 +194,8 @@ def test_contact_benchmark_repair_tracking_forwards_candidate_issues_keyword(
         ("最近どう？", "ぼちぼちだよ笑"),
     ]
     baseline = [
-        "仕事おつかれ、しんどいよね笑",
-        "それは疲れるよね、ほんとおつかれ笑",
+        "仕事おつかれ、しんどいよね",
+        "それは疲れるよね、ほんとおつかれ",
         "仕事って疲れるよね",
     ]
     fake_issues = [
@@ -886,7 +886,7 @@ def test_contact_benchmark_keeps_supplied_fixture_gold_isolated_by_contact(
         def generate(self, **kwargs):
             captured_messages.append(kwargs["messages"])
             return json.dumps(
-                {"replies": ["ゆっくり休めそう？笑", "無理せず休んでくださいね", "そうなんだね！"]},
+                {"replies": ["ゆっくり休めそう？", "無理せず休んでくださいね", "そうなんだね！"]},
                 ensure_ascii=False,
             )
 

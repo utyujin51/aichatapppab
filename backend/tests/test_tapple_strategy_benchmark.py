@@ -181,11 +181,11 @@ def test_tapple_benchmark_expectations_distinguish_clear_ambiguous_and_declined(
     assert expectation_met(
         scenarios["counterproposal"],
         {
-            **result_for("counterproposal", "continue", "日曜なら大丈夫です、ありがとう！何時ごろがよさそうですか？"),
+            **result_for("counterproposal", "continue", "日曜なら、私も予定を確認してみますね。時間はまた相談しましょう。"),
             "replies": [
-                "日曜なら大丈夫です、ありがとう！何時ごろがよさそうですか？",
-                "日曜がいいですね！何時ごろなら空いてますか？",
-                "日曜日ならうれしいです！時間は何時頃に決めますか？",
+                "日曜なら、私も予定を確認してみますね。時間はまた相談しましょう。",
+                "日曜ならこちらの都合を確認して、何時ごろにするか相談したいです。",
+                "日曜なら都合が合うか確認して、あとで連絡しますね。",
             ],
         },
     )
@@ -582,7 +582,11 @@ def test_shared_activity_low_reciprocity_waits_while_warm_reciprocal_case_invite
             "evidence": [latest_contact],
             "invite_example": None,
         },
-        "replies": _three_replies("パンケーキのお店、気になりますね。"),
+        "replies": [
+            "パンケーキって、ふわふわ系としっかり系ならどちらが好みですか？",
+            "パンケーキのお店を選ぶなら、雰囲気とメニューどちらを重視しますか？",
+            "近いうちに行くなら、どんなパンケーキのお店が気になりますか？",
+        ],
     }
 
     assert expectation_met(weak, result)

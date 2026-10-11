@@ -1,5 +1,29 @@
 # 現行返信生成アーキテクチャ分析
 
+## 2026-10-11 最新追記：習慣claim guardと固定70ケースv27
+
+独立reviewerの指摘を受け、通常返信の本人習慣チェックを修正した。対象の曖昧な「気をつけている」を、食事や紫外線など別対象が明記された既知情報から許可しないよう、claimの正規化後完全一致を要求する。既知情報はラベルを除き、句点・改行ごとに比較する。経験動詞を含むclaimは、現在の質問と同じ活動・action・topicを既知情報で確認できるclaimに限り専用経験validatorへ委ねる。読点で連なるclaimは個別に確認する。回帰テストは別対象fact、`自分:`ラベル、複数文fact、経験質問のない活動習慣、質問後の別活動、同一文での別活動を扱う。独立コードreviewはこの差分で追加指摘なし。
+
+最新コードのbackend全体は**1,710 passed / 2 warnings**。Python `compileall`、`git diff --check`、frontend `npm run build`もPASS。
+
+固定70ケースはAPI 503により最初のrunがb38で停止したため、完了済み37ケース、残る32ケース、b38再試行を同じHEAD・設定で結合した。公式verifierは70/70、一意、欠落なし、エラーなしを確認。自動値は`context_fit=0.627`、`human_chat_fit=0.896`、`conversation_fit=0.967`、`ai_like_rate=0.085`、`too_many_questions_rate=0.000`、`echo_rate=0.069`。既存thresholdのうちhuman 0.900のみ未達でFAIL。artifactは`C:/Users/poiuy/AppData/Local/Temp/aichat-pipeline-70-current-v27-combined-20261011.json`。
+
+代表8ケース（b01,b10,b20,b30,b40,b50,b60,b70）の独立本文レビューも**FAIL**。artifactに直前の会話履歴が含まれないため文脈依存の候補は確定できないが、短い了承に意味の近い応答が重なる、感謝・安心・完了状況を根拠なく付ける、入力を言い換える候補があった。自然さの観点でも改善が必要。
+
+前回記録の固定70ケースv24（human 0.894）、Contact A/B/C v23（独立本文レビュー1/3 PASS）、Tapple v46（5/10 PASS）とあわせ、Step 18-R4はまだ未完了。評価器・threshold・canonical casesは変更していない。変更は未commit・未push。
+
+## 2026-10-11 Tappleの不興味境界再検証
+
+実API v47（Gemini 3.1 Flash Lite、`recent_activity_disinterest`と`different_activity_does_not_clear_disinterest`）は2/2生成完了したが、期待条件は1/2。別担当の本文レビューは**2/2 FAIL**で、本人がカフェを苦手と伝えているのに、カフェへの肯定・同行を連想させる返事を続けた。別活動の映画が好きという情報はあるものの、相手が映画好きとは確認できないため、映画への誘いは根拠不足との指摘も受けた。artifactは`C:/Users/poiuy/AppData/Local/Temp/aichat-tapple-disinterest-v47-20261011.json`。
+
+この結果から、strategyを`wait`へ直すだけでは返信本文の矛盾を止められないと分かった。本人が最近苦手と伝えた活動への肯定的な同調をTapple candidate validatorで検出し、既知の別の好みへの自然な話題転換は許す回帰を追加した。返信promptにも、本人の関心を装わず、別活動へ移るときは本人が実際に好みを示した話題に限る条件を追加した。別レビューで見つかった後続否定の誤解除、嫌いな活動と別活動を同時に肯定する抜け、同一返信内の否定と肯定の矛盾もテストで固定した。後続の明確な自己訂正「でも今は好きです」は不興味を解除し、「好きではないです」は解除しない。
+
+prompt込みの実API v49も対象2ケースのうち1ケース目で候補検証が尽き、HTTP 502となった。ガードを通る返信を安定して作れることは確認できていないため、この改善を品質合格とは扱わない。v48/v49で全ケース完走できず、Tapple最新実API受け入れは**未達**。
+
+独立コードReviewerの最終差分確認は**PASS（具体的な指摘なし）**。途中で確認された「好きというわけではない」「好きとは言えない」「好きとは限りません」「好きでもない」は、いずれも好意への訂正として誤認しない回帰ケースへ追加。明確な「でも今は好きです」は訂正として認める。肯定表現を同一文内の活動語へ対応づけ、カフェの苦手表明と映画への自然な話題転換を区別する。
+
+最終コードのbackend全体は**1,707 passed / 2 warnings (91.95 s)**。frontend `npm run build`、`python -m compileall -q backend/app`、`git diff --check`もPASS。警告は既存のFastAPI `on_event` deprecation。変更は未commit・未push。全体70ケース v24のhuman_chat_fitは0.894で固定threshold 0.900未満、Contact A/B/C v23独立レビューは1/3 PASS、Tapple v46は5/10 PASS。したがってStep 18-R4は未完了。evaluator、threshold、canonical casesは変更していない。
+
 ## 2026-10-10 Contact Bench R29と並列レビュー
 
 R29では生成指示の重複を減らし、同一相手Goldの文体サマリーをsystem promptだけに集約した。一般的な返信内容・文量・質問方針も正規ブロックへ統合した。明示tone、事実安全性、Gold優先、自然に会話を終える判断は維持している。
@@ -2499,3 +2523,166 @@ WIP commit `6d4b373`はforkの`codex/chat-quality-20261008`へ公開済みで、
 全14ケースの実API確認は11ケースを実行して停止した。10ケースは生成成功し、`tentative_interest`で候補検証による502が発生した。provider応答はすべてHTTP 200で、quota制限やprovider 503はなかった。`declining_engagement`、`counterproposal`、`decline`の3ケースは未実施。
 
 artifactは`aichat-tapple-full-v24-20261010.json`。summaryの`quality_pass`と`full_suite_pass`はfalse、評価器の期待条件を満たした集計は0/14だった。10ケースの生成成功、本文の独立レビューが未完了であること、期待条件の合格数0件をそれぞれ区別する。停止した候補検証と期待条件の不一致は別担当が分析中で、原因はまだ確定していない。再実行は行っておらず、評価器と閾値も維持した。Contact全体、最新70ケース、Tapple全体の受け入れは引き続き未達で、Step 18-R4は未完成。
+## 2026-10-11 限定比較v25・v26・v27の結果
+
+通常promptのTemp変更による8ケース比較v25を、v23の同じ8ケースと比較した。`human_chat_fit`は0.569から0.794、`context_fit`は0.550から0.604、echo該当候補は24件中13件から6件となった。`conversation_fit=1`、過剰な質問・説明・AIらしさの該当数0件は維持した。反復の減少は確認したが、独立本文レビューでは文法の欠落、根拠のない引越し負担の推測、連絡の要求、内容の薄い一般的な返答が残ったため採用しなかった。本番promptは変更していない。artifactは`aichat-pipeline-reaction-8-v25-20261011.json`。対象は8ケースであり、70ケース全体の受け入れ結果は更新しない。
+
+Tappleの判断順序をTempで変更したv26では、相互関心・誘い受諾・関心未確定の3ケースを確認した。生成は2/3件、既存の期待条件への適合は0/3件。相互関心では同意済みとする前提がなく、`continue`と誤判定し、未確認の写真への共感も残った。誘い受諾では再度の誘いが評価器の正規表現と一致せず、関心未確定では誘いが混入して候補検証による502になった。provider応答はすべてHTTP 200だった。判断順序の変更による改善は確認できず採用していない。artifactは`aichat-tapple-action-order-v26-20261011.json`。
+
+短い条件付き指示を使う8ケース比較v27は8/8件の生成が完了し、repairは2件だった。`human_chat_fit=0.688`、`context_fit=0.627`、`conversation_fit=0.987`、`echo_rate=0.333`。v25の0.794・0.604・1・0.250に比べ、contextは上がったがhuman・conversationは下がり、echoは増えた。本文では映画の3候補中2候補に前置きがあり、引越し負担の推測、ボーナスへの挨拶だけの候補、よい雰囲気への反応を語尾だけ変えた3候補が残った。今回の指示は本番に採用しない。artifactは`aichat-pipeline-reaction-8-v27-20261011.json`。
+
+Tappleのaction診断v28では、3回のattemptで計6回のAPI応答がすべてHTTP 200となったが、候補検証で502となった。最初の2回は初期action・repairへの受渡し・repair出力がすべて`continue`だった。3回目は初期actionが`wait`、repairの受信も`wait`だったが、出力は`continue`に変わった。最後は確認できない希望を含む候補として却下された。strategyの欠落や`None`はなかった。確認した範囲ではactionの受渡しに問題はなく、モデルのrepair出力がwait方針から外れた。artifactは`aichat-tapple-action-trace-v28-20261011.json`で、metadataのみを保存し、返信本文やキーは含めていない。
+
+wait専用の補助指示をTempで比較したv29は生成1/1件が完了した。返却3候補のactionはすべて`wait`で、hard validatorの違反は0件。API応答は4回すべてHTTP 200だった。ただし既存の期待条件は`reply_not_contextual`でFAILとなり、適合は0/1件だった。repairが受け取ったactionは2回とも`continue`で、wait専用の試験指示は一度も発動しなかった。そのためv28からの変化を試験指示の効果とは判断できず、採用しない。metadata artifactは`aichat-tapple-wait-repair-v29-20261011.json`。
+
+APIを使うprompt比較はいったん停止し、readinessのplanning policyをオフラインで分析する。本番コードは`12320a1`から変更していない。評価器・閾値も維持している。最新WIP commit `12320a1`はforkへ公開済みで、前の実装WIPは`6d4b373`。GitHub mainは更新していない。最新70ケースはFAIL、Contactは2/3、Tapple全体は未完了のまま。Step 18-R4は未完成。
+
+## 2026-10-11 planning補正案の採用見送り
+
+continueからinviteへ補正する案は設計レビューを受けて採用を見送った。条件付きの希望と、完了した観察を安全に一般区別できず、伝聞でも誤って補正する問題が残ったため。特定ケース向けの例外は追加しない。実装担当は今回のpatchとsnapshotをDownloadsへ保存し、その差分だけを撤回して公開baseline `12320a1`へ戻す予定。以前からの未コミット変更は消さずに保存する。
+
+793件成功は撤回予定の案に対する対象テストの結果で、採用コードの全件合格を示さない。baselineへ戻した後の全backend検証は未完了。Contact 2/3、最新70ケースFAIL、Tapple全体未完了を維持し、Step 18-R4は未完成。
+
+## 2026-10-11 撤回完了後のbaseline検証
+
+planning補正案の今回の差分は撤回した。保存先は`C:/Users/poiuy/Downloads/TAPPLE_PLANNING_WITHDRAWN_20261011/`で、UTF-8のpatch、2ファイルのsnapshot、SHA manifestを保持している。撤回後の公開baseline `12320a1`で全backendは1,679件成功、既存警告2件、113.61秒。`compileall`と`git diff --check`もPASSだった。撤回案の793件成功とは区別する。
+
+Temp限定のconsent scope比較v31は、最初の相互関心ケースで`candidate_validation_failed`による502となり停止した。実施は1/3件で、残る2件は未実施。`complete=false`、期待条件への適合0/3、`quality=false`。返却候補がなく文章品質は評価できないため、採用していない。artifactはTempの`aichat-tapple-consent-scope-v31-20261011.json`。productionの変更はない。Contact 2/3、最新70ケースFAIL、Tapple全体未完了の受け入れ状態は維持する。
+
+## 2026-10-11 Temp限定consent trace v32
+
+Gemini 3.5 Flash Liteを使い、Temp wrapperだけで合成1ケースを確認した。最初の事前検査は正確な文字列の誤記で失敗し、APIは呼び出していない。文字列を修正して独立再レビューを受けた後、実行は完了し3候補を生成した。解析したactionは`continue`で、期待した`invite`には適合せずFAIL。初期生成と最初のrepairではそれぞれ`unsupported_personal_desire`を検出し、後続生成と最終返却候補はproduction validatorを通過した。
+
+独立本文レビューでは、内容は理解できて文脈にも根拠があるが、3候補がほぼ同義で次の行動につながらないと判断した。今回のprompt区別実験で改善は確認できず、本番には採用しない。artifactはTempの`aichat-tapple-consent-trace-v32-20261011.json`で、metadataのみを保存し、返信本文やキーは含めていない。本番prompt・コードは変更していない。変更はTemp wrapperのみのため全backendは再実行せず、baselineの1,679件成功を維持する。main公開とStep 18-R4の受け入れは未完了。v31の候補検証502・未採用の記録は変更しない。
+
+## 2026-10-11 読み取りレビューとAPI比較の停止
+
+設計担当の読み取りレビューでは、productionのparserとvalidatorは、最新の相手発言に現在の活動への関心があるかをinviteの条件として確認している。一方、初期promptには以前の共有関心を使う指示と、短い相づちへの注意が混在しており、判断条件が一致していない可能性がある。ただしv32では候補が安全なcontinue側にも移っており、parserが今回の不一致を起こしたと証明する結果ではない。
+
+返信候補はinvite_exampleとは意図的に分けられ、同じ話題で自然に似た候補を返すことも許容している。期待actionへの適合と、候補の選択幅は別の課題として扱う。v31とv32で改善は確認できず、v32の生のrequestとrationaleも保存していないため、追加API実行で得られる情報は少ないと判断して比較を停止する。
+
+今後の仮説としては、必要性を確認したうえで初期promptのinvite条件をparserの最新発言条件にそろえる案がある。ただし未検証で、採用していない。本番の変更やcommitは行わず、原因も確定していない。
+
+## 2026-10-11 Temp限定current-interest比較v35
+
+Gemini 3.5 Flash Liteを使い、固定4ケースの確認を開始した。最初の`mutual_activity_interest`で候補検証が通らず停止し、実施は1/4件、残る拒否・安全懸念・受諾済みの3ケースは未実施。artifactはTempの`aichat-tapple-acceptance-probe-v35-20261011.json`で、`complete=false`、`stopped_reason=generation_error`、終了コード2。返信候補が返らなかったため、文章品質は評価できない。
+
+記録した6回のstrategy解析ではすべて`invite`が出力され、strategy自体の検証違反はなかった。一方、候補の検証では`unsupported_personal_desire`、`tapple_activity_target_mismatch`、`tapple_invite_reply_missing`、`tapple_unsupported_activity_plan`が繰り返し検出された。今回のprompt変更でaction選択が期待方向へ動く場合は確認できたが、送信可能な候補の生成には至らず、受け入れ条件の改善とは判定しない。既存validatorと試験ケースは維持し、この変更は本番へ採用していない。productionコードに変更はない。受諾・拒否・安全懸念への誤判定がないことも今回の実行では確認できていない。
+
+v35実行後、全backendを再実行し1,679件成功、警告3件、114.60秒だった。初回はTemp checkoutに仮想環境がなく、手元の仮想環境でも`numpy`が不足して収集が止まったため、Tempに置いた`numpy`で再実行した。`compileall`と`git diff --check`も成功。テスト環境以外のコードは変更していない。
+
+## 2026-10-11 Temp限定invite返信比較v36
+
+v35と同じinvite選択文・固定4ケース・既存validatorを使い、返信候補には活動名を明記した質問形の誘いを求める一文だけを初期生成とinvite修復に加えた。3ケースは候補を返したが、`accepted_invitation`は`generation_error`となり、全体は`complete=false`、終了コード2。artifactはTempの`aichat-tapple-acceptance-probe-v36-20261011.json`。
+
+`mutual_activity_interest`は`invite`で期待条件とhard validationを通過した。独立本文レビューも、3案が根拠のある低圧な誘いとして送信できると評価した。ただし3案は同じ誘い方に寄り、選択肢としての違いは弱い。`recent_activity_disinterest`は期待`wait`に対して`continue`を選び、候補も本人がカフェに否定的だった発言を反映せず、共通の関心があるように見せていた。`meeting_safety_concern`は許容actionの`wait`を選んだが、evidenceが最新発言の正確な引用ではないとして期待条件に失敗した。独立本文レビューでは安全面の不安を受け止める表現が弱く、候補の一つは安心を軽く扱う印象だった。`accepted_invitation`は返信が生成されず本文未評価。traceでは再招待・日程調整不足とstrategy欠落が繰り返された。
+
+v36の一文は最初の招待ケースで候補生成を通過させたが、4ケース全体のaction・根拠・文章品質は合格していないため、本番へ採用しない。拒否や本人の関心否定を優先する判断、最新発言のevidence、受諾後の日程調整を既存promptでどう扱うかを整理してから次の比較を行う。canonicalケース、評価器、閾値は変更しておらず、productionコードにも変更はない。
+
+## 2026-10-11 Temp限定diagnostic probe v37
+
+v36のprompt・ケース・モデルを保ち、成功時の返信3案の保存条件はそのままに、parse状態、schema状態、evidence件数、evidenceが最新の相手発言に含まれるかを示す限定metadataを追加した。失敗途中の返信本文は保存しない。4ケースを開始したが、`accepted_invitation`で`generation_error`となり全体は未完了、期待条件の適合は0/4。artifactはTempの`aichat-tapple-acceptance-probe-v37-20261011.json`。
+
+`mutual_activity_interest`はschema-validでevidenceも最新発言に一致したが、actionは`continue`で期待`invite`から外れた。返却3案はhard validationを通ったものの、独立レビューでは2案が明確な誘いにならず、3案の差も弱かった。`recent_activity_disinterest`は期待`wait`を選び、evidenceも一致したが、返信が本人のカフェへの否定的な関心を反映せず`reply_not_contextual`となった。独立レビューも本人がカフェに関心を持つように読める文面を問題とした。`meeting_safety_concern`も`wait`だったが、evidenceは2件中すべてが最新発言内にあるとは確認できず、`invalid_evidence`と`reply_not_contextual`で失敗した。独立レビューでは不安への配慮に一定の評価があったが、会話とのつながりが足りないと判断した。
+
+追加metadataにより、`accepted_invitation`の失敗は一部attemptで不正JSON、別のattemptではschema-validな`continue`ながら再招待・日程調整不足と区別できた。候補テキストやevidence本文、rationaleは保存していない。v36の返信指示だけでは判断の一貫性や4ケース全体の品質を確認できず、本番には採用しない。次は本人の新しい意向・受諾済みの状態を優先する条件を一般化して検討し、evidenceの最新発言条件も明示する。試験ケースと評価器は変更せず、productionコードにも変更はない。
+
+## 2026-10-11 Temp限定state priority比較v38
+
+v37の診断・固定4ケース・v36のinvite返信指示を保ち、本人の新しい意向と受諾済みの誘いを以前の関心や一般的な不確かさより優先する規則、evidenceを最新の相手発言から完全一致で取る規則を初期生成・通常修復・strategy欠落修復に加えた。実行は`accepted_invitation`の候補検証で停止し、`complete=false`、期待条件の適合0/4。artifactはTempの`aichat-tapple-acceptance-probe-v38-20261011.json`。
+
+全記録でstrategy schemaは有効となり、evidenceは最新発言に一致した。`recent_activity_disinterest`は`wait`を選んだが、返信候補が本人の関心否定を反映せず、`unsupported_personal_desire`でhard validationに失敗した。`mutual_activity_interest`は`continue`となり、期待`invite`に届かなかった。`meeting_safety_concern`は`wait`を選んだが返信が文脈に合わず、期待条件に失敗した。`accepted_invitation`は`continue`を選んだものの、再招待や日程調整不足の違反が残り、3案を返せなかった。
+
+独立本文レビューでは、相互関心の返信は根拠があり低圧だった一方、会話を前へ進める力と候補差が弱いと判定した。関心否定と安全懸念の返信は文脈や相手への配慮が不足し、いずれもFAIL。成功したケースはなく、本prompt変更は採用しない。今回の診断ではevidence規則は全attemptで通過したが、action選択・返信本文・受諾後の日程調整は安定しなかった。canonicalケース、評価器、閾値は変更せず、productionコードにも変更はない。
+
+## 2026-10-11 Temp限定accepted_invitation診断v39
+
+v38と同じprompt・モデル・canonicalケースを使い、`accepted_invitation`だけを実行した。文面の問題か候補validatorとのずれかを見分けるため、`tapple_reinvitation`または`tapple_scheduling_missing`が返った場合に限り、その時点の返信候補3件を診断traceへ記録した。各文は500文字までに制限し、通常の結果欄には返信本文を保存しない。raw provider出力、prompt、rationale、evidence本文、キーは保存していない。独立レビューとスクリプト内のオフライン・プライバシーpreflightが終わってから一度実行した。
+
+strategy解析は6回すべてschema-validで、evidenceも最新の相手発言と一致した。しかし候補検証を通る3案ができず、artifactは`complete=false`、`stopped_reason=generation_error`、終了コード2となった。返信候補は6組記録され、いずれも再招待または日程調整不足の判定を少なくとも一つ含んでいた。artifactはTempの`aichat-tapple-accepted-diag-v39-20261011.json`。
+
+別担当による本文レビューでは、「都合の良い日ありますか」「いつの週末が空いてますか」「都合の良い曜日や時間帯はありますか」などは、自然な受諾応答を含み、本文だけで日程を直接確認していると評価された。一方、「近いうちに予定を合わせる」「また相談する」は具体的な日を尋ねず、日程調整の意向にとどまる。「行きましょうか？」は受諾後の再確認に聞こえる場合があり、「駅前のどのあたり」は場所質問で日程確認ではない。文面には品質のばらつきも残っている。
+
+同じ候補を既存validatorへ一案ずつオフラインで再投入すると、判定器の取りこぼしと誤検出が確認できた。たとえば「都合の良い日ありますか」や「都合の良い曜日や時間帯はありますか」は実際の日程確認だが、`tapple_scheduling_missing`になる場合がある。反対に「お互いの予定を合わせてまた相談しましょうね」は具体的な日程確認がないのに通る場合があった。また、private-place判定の正規表現が「近いうち」の末尾の「うち」を自宅表現として拾い、「近いうちに予定合わせて行きましょうか」を私的な場所への提案として誤検出した。これらはcanonicalケースや閾値を変えず、本文とvalidatorを個別に再確認して特定した。
+
+この結果から、v38の候補失敗をすべて文章生成の問題とは扱えない。既存validatorには受諾後の判定で見逃しと誤検出があり、モデルへの追加禁止指示だけでは原因を分けられない。依頼済みの制約に従って評価器・閾値・canonicalケースは変更せず、v39の診断用promptも本番へ採用しない。全backendの最終確認値はv35後の1,679 passed／警告3件で、v36〜v39ではproductionコードを変更していない。
+
+## 2026-10-11 B限定v16の独立本文レビュー
+
+Tempの`aichat-contact-B-salvage-v16-20261010.json`にある返却候補3件を、PROBE、Bの合成Gold傾向、会話上の根拠と照合して新しい担当が独立評価した。仕事で疲れた発言に休息を勧めるのはGold例にも沿っており、疲労を受け止める方向は適切と判断された。一方、「お仕事お疲れ様ですね」は不自然で、2案が同じ書き出しと休息提案を共有しており、候補差も弱い。1案目は自然だが短く、Goldの休息への気遣いとは異なる。最終判定はB限定**FAIL**。休息への言及自体や候補の短さだけを不合格理由にはしていない。
+
+## 2026-10-11 最新70ケースv23の代表出力レビュー
+
+v23は`human_chat_fit=0.866`で既存下限0.900を下回った。別担当が低得点例を含む8ケース（b01、b04、b24、b52、b56、b59、b66、b70）を本文だけで確認した。結果は、評価器が自然な受け止めまで言い換えと扱う例がある一方、本当に文脈を外す候補も複数ある、という混在だった。b04の映画への受け止めやb59の「また明日」への返事は自然な範囲で、語を繰り返すだけで低品質とは言えない。b01では休息を推測した質問、b52では「お疲れ様です」という唐突な返答、b70の一候補では語尾の不自然な混在が問題だった。b56の購入予定への質問やb66の「えらいなあ」は相手との関係次第で判断が変わるため保留となった。
+
+このレビューは代表8ケースの内容評価で、70ケース全体の再採点ではない。機械スコアの不足をすべて誤判定とは扱わず、文脈の薄い短い発言へ無関係な労い・休養推測を足さないことを次の一般的なprompt仮説とする。既存のprompt指示との重複、変更の影響範囲を先に確認する。評価器・閾値・70ケースは維持し、まだprompt変更や新しいAPI比較は行っていない。
+
+## 2026-10-11 Temp限定の短文反応probe v40・v41
+
+v40は最新70ケースv23の固定8件（b01,b04,b24,b52,b56,b59,b66,b70）で、短い曖昧な発言に対する広めの根拠条件をGemini 3.5 Flash Liteで比較した。8/8件が完了し、repairは3件。自動値はhuman_chat_fit 0.550、context_fit 0.462、conversation_fit 1.000、echo_rate 0.542だった。同じ8ケースに限ったv23の値はhuman_chat_fit 0.544、context_fit 0.492、conversation_fit 0.987で、v40のhuman_chat_fitはほぼ同水準、context_fitは低かった。独立レビューでは保存済み出力の本文も対で比較した。
+
+本文レビューではv40はb04とb70でわずかに優位だったが、b01・b24・b52・b56・b59・b66はv23側が優位または僅差で優位だった。v40では相づち候補が「おー笑」「おー笑笑」と笑い語尾だけで重なったり、ボーナスの報告から喜びやご褒美を想定したりした。全体の品質改善は確認できず、v40のpromptは採用しない。
+
+v41では条件を「自由時間・報酬・成果だけから休息済み・疲労・仕事の負担や努力を推測しない。眠気や疲れが明示された場合は気遣ってよい」に絞り、b01,b02,b52,b56,b59の5件を実行した。5/5件が完了し、repairは3件。自動値はhuman_chat_fit 0.603、context_fit 0.543、conversation_fit 0.860、echo_rate 0.267だった。独立本文レビューはv23をb01・b02・b52・b56で支持し、v41はb59の別れだけ僅差で優位とした。v41でもb01に「お疲れ様」「のんびりできた？」が残り、b56には「頑張ったご褒美」「モチベーションが上がる」と努力や気分を補う候補があった。b02では眠気に応じた休息の気遣いも残った。主要な狙いは達成せず、v41も採用しない。
+
+両比較はTemp wrapperのみで、本番prompt・生成コード・評価器・閾値・試験ケースは変更していない。wrapperは独立Pythonレビューとoffline preflightを通過し、固定case ID、Temp出力、プロンプトパッチとプロセス状態の復元を確認してから実行した。artifactsはTempの`aichat-pipeline-ack-grounding-v40-20261011.json`および`aichat-pipeline-ack-grounding-v41-20261011.json`。
+
+実行後の全backendは`python -m pytest backend/tests -q`で1,679件成功、警告2件、92.66秒。frontendの`npm run build`も成功した。checkoutのproductionコード差分は増えておらず、v40/v41の汎用prompt追加は採用していない。短文への自然な相づちと、根拠のない状況推測を区別する品質課題は残るため、Step 18-R4は未完成。
+
+## 2026-10-11 Contact B v43・v44の独立本文比較
+
+B限定v16の返却候補3件を独立レビューしたところ、「お仕事お疲れ様ですね」という不自然な導入があり、候補2件は休息を勧める意味が重なっていた。v16 artifactには最終候補と集計診断のみがあり、初期生成・hard repair・候補poolのどこで不自然な言い回しや意味重複が生じたかは特定できない。
+
+現行prompt・固定B合成Gold6件・probe「仕事で疲れた」・Gemini 3.5 Flash Liteで一度だけ再実行したv43は、最終候補が「お仕事お疲れ様です！まずはしっかり体を休めてくださいね。」「お疲れ様です！どうか無理せずゆっくり休んでくださいね。」「お仕事本当にお疲れ様です！しっかり身体を休めてくださいね。」だった。独立本文レビューでは、v16より敬語が自然で関連性も少し上がったが、3案とも休息を勧め、候補差は弱いとされた。過去Goldと現行promptの影響を一度の比較から因果関係としては特定できない。
+
+v44では、候補全体を並べて意味の重なりを確認し、自然な別焦点がある場合だけ分ける一文をTempで追加した。役割、質問、文量の指定はない。最終案は休息を勧める案、短い「お仕事お疲れ様です！」、温かくして過ごす案で、独立レビューはv43より意味の重複が少ない点を評価した。一方「あたたかくして」は疲れたという情報だけからは余分な提案になり得る。独立担当は限定的な改善として評価したが、各promptは1回の生成のみのため、再現性と他ケースへの影響は未確認。v44の文言は本番へまだ採用していない。
+
+v43 artifactはTempの`aichat-contact-B-current-v43-20261011.json`、v44 artifactは`aichat-contact-B-semantic-focus-v44-20261011.json`。v44は独立wrapperレビューとoffline preflight後に実行し、最終候補3件と固定カテゴリ診断のみを保存した。prompt全文・raw provider応答は保存していない。両実行ともproduction code・試験ケース・評価器・閾値は変更していない。
+
+次は意味重複確認の追加文を本番に入れず、既存の70ケースの同一固定subsetなどで改善・副作用を確認する必要がある。今回の1件で短文相づち・質問・別役割を必須にする変更は行わない。Contact B全体品質、Contact A/B/C、最新70ケースの合格は未達で、Step 18-R4は未完成。
+
+## 2026-10-11 Temp限定の候補意味差probe v45
+
+v44の候補意味重複チェック文を最新70ケースv23の固定8件（b01,b04,b24,b52,b56,b59,b66,b70）へ広げ、Gemini 3.5 Flash Liteで一度実行した。8/8件が完了し、repairは1件。自動値はhuman_chat_fit 0.519、context_fit 0.467、conversation_fit 0.987、echo_rate 0.542だった。同じ8件のv23（0.544／0.492／0.987）およびv40（0.550／0.462／1.000）に対し、v45の自動値はhuman_chat_fitで下回り、context_fitはv40をわずかに上回った。これらは少数ケースの自動診断で、自然な文章品質の判定には使わない。
+
+独立本文レビューでは、v45はb01・b70の短い受け止めが自然で、b52もv40より候補差が改善した。一方b24・b52・b70には意味の近い案が残り、b24の語尾は不自然、b04には映画館で見たという未確認の想定があった。b56の「支給日」、b59の「おやすみなさい」、b66の「ダイエット中」も入力にない状況を足している。v23にはb52・b56でより異なる返し方があり、全体としてv23を上回るとは評価できなかった。意味重複確認の一文が候補の役割差を安定して生む証拠は得られず、本番採用しない。各条件1回のため因果・再現性は未確定。
+
+v45 artifactはTempの`aichat-pipeline-semantic-focus-v45-20261011.json`。wrapperは独立レビューとoffline preflightを通過し、固定8件、Temp出力、patch復元を確認して実行した。production code・評価器・閾値・canonicalケースは変更していない。現行の候補差指示が出力で安定して機能する理由・失敗する理由は未特定で、prompt追加を重ねる根拠は不足している。次は出力群の具体的な意味重複例と生成時点を読み直し、修正可能な原因が確認できた場合だけ小さく検証する。品質受け入れは未達で、Step 18-R4は未完成。
+
+## 2026-10-11 Tapple validator corrections and verification
+
+独立レビューv39が指摘した2つのvalidator不具合を、固定canonicalケースや評価閾値を変えずに修正した。受諾済みの誘いに対する「都合の良い日ありますか？」は日程確認として認識されず、日程調整不足で拒否されていた。`_TAPPLE_SCHEDULING_NEXT_STEP_RE`に、都合・予定・日程について「ありますか」と尋ねる形を追加した。`近いうちに予定を合わせて行きましょうか`の「うち」が私的な場所として誤検出されていたため、`近いうち・早いうち・そのうち`の時間表現を場所判定の前に除外した。後ろに「おうちで会う」など実際の自宅提案が続く場合は引き続き検出する。
+
+6件の再現テストは修正前に4件失敗、2件成功し、修正後はすべて成功した。テストには自然な日程質問3種、時間表現3種、時間表現の後に本当に自宅で会う提案を置いたケースを含む。別担当のPythonコードレビューは現行checkoutの差分を確認し、指摘なし。今回追加したv24の実返信例も含む全backendは`python -m pytest backend/tests -q`で**1,686 passed / 2 warnings**（118.99秒）。frontend `npm run build`、`python -m compileall -q backend/app`、`git diff --check`も成功した。
+
+修正後の実API疎通確認は`provider_error`で失敗した。429とは分類されなかったため、別account/modelへの続行やベンチ実行は止めた。返信本文を含む新しい実API結果は得ていない。最新の受け入れ記録は変更前のまま：Contact A/B/Cは本文品質2/3、最新70ケースは品質閾値未達、Tappleは14/14の期待条件未達。Step 18-R4は未完了。
+
+修正範囲はTapple validatorとその回帰テストのみ。評価器・閾値・canonical入力・返信promptは変更していない。変更は未コミットで保持している。API疎通が回復したら、まず`accepted_invitation`を1件確認し、結果が通ればTapple全14件、Contact A/B/C全9返信、固定70ケースへ進む。各artifactを独立した本文レビューにかけ、すべての受け入れ条件が揃うまでStep 18-R4の完了とは扱わない。
+
+### v24 `accepted_invitation` の独立本文レビューと評価器不整合
+
+保存済みv24 artifactの`accepted_invitation`は3返信を生成している。独立本文レビューで、日程確認に進む2案は自然で、残る「ぜひ行きましょう！」を含む案も受諾後の返信として不自然な誘い直しではないと判断された。現行の`validate_candidate_replies`も3案を受け入れる。具体例「ぜひ行きましょう！最近はいつあたりが空いてますか？」を既存の受諾後日程調整テストに加え、focused testで確認した。
+
+一方、benchmark runnerは`accepted_invitation`にも`no_reinvitation: true`を設定し、各返信を文脈を見ずに`_TAPPLE_REINVITATION_RE`へ照合する。そのため受諾済みの「ぜひ行きましょう！」を含む案が`reinvitation_not_allowed`となる。artifactの失敗は現行生成validatorの拒否ではなく、この別チェックとの不整合で再現した。Canonical入力・評価器を変更しない制約を守り、benchmark結果のFAILは維持する。受諾後の自然な日程確認と再勧誘を区別するルールは現行runnerで表現できておらず、Tapple全14件の受け入れは未達のまま。独立レビューはこの原因を確認した。今回の確認は既存artifactの読み取りで、新しいAPI生成は行っていない。
+
+## 2026-10-11 実API再確認 v46（Tapple / Contact A-B-C）
+
+primaryの疎通確認は`gemini-3.5-flash-lite`でPASSした。最初の`api_key_missing`はTemp checkout基準の誤った相対パスによるもので、Desktop上のenvファイルを絶対パスで指定して再確認した。キー値は出力していない。
+
+Tapple全14件は11件を試行し、10件で返信を生成、`tentative_interest`は3回のhard-validation失敗後にHTTP 502で停止した。artifactは`aichat-tapple-full-v46-20261011.json`。summaryは`complete=false`、期待条件2/14、品質FAIL。生成成功した10件の独立本文レビューは5 PASS / 5 FAIL。FAILは`mutual_activity_interest`、`unlisted_shared_hobby`、`shared_activity_low_reciprocity`、`recent_activity_disinterest`、`different_activity_does_not_clear_disinterest`。特にカフェへの本人の苦手意識を無視・反転する返信、低相互性で前のめりな返信、話題の言い換えに留まる候補群が残った。`accepted_invitation`のFAILは受諾後の「ぜひ行きましょう」を文脈なしの再勧誘regexが拾ったもの。`meeting_hesitation`と`safety_concern`の自動FAILもevidence/marker判定で、独立レビューでは返信本文は概ね安全だった。単独の`accepted_invitation` v46も3案すべてproduction validatorを通過し、runnerは同じregex理由でFAILした。単独artifactは`aichat-tapple-accepted-invitation-v46-20261011.json`。
+
+同日にContact A/B/CをPROBE「仕事で疲れた」で実行した。artifactは`aichat-contact-ABC-current-v23-20261011.json`。A/B/Cすべて生成完了したが、独立本文レビューはA PASS、B FAIL、C FAILの1/3。Aは短く自然でGold傾向にも合う。Bは丁寧だが3案が労いに寄り、休息への気遣いがなく、候補差が弱い。Cは丁寧語に偏り、Goldのカジュアルな疲労応答を十分に再現しない。API生成完了やhard validation通過はプロフィール品質の合格を意味しない。
+
+Tapple・Contactとも未受け入れ。固定70ケースv24はprimary疎通確認後に再実行中。評価器・閾値・canonical入力は変更していない。
+
+## 2026-10-11 最新Tapple独立レビュー・再確認 v67〜v69
+
+自己発言に複数の好みがあるとき、各文の話題を取り出して新しい好みを反映するようvalidatorを修正した。同じ話題を「苦手だったけど今は好き」と訂正する節は現在の極性を採用し、別話題への言及、他者への質問、彼氏・家族などの好みを本人の訂正と誤認しない。好み判定の独立コードレビューは最終PASS。全差分レビューで見つかった「読点で連結された既知習慣を照合できない」問題も事実側を読点で分割して解消した。追加回帰テストを含む全backendは`python -m pytest backend/tests -q`で**1,793 passed / 2 warnings**（118.90秒）。frontend build、`compileall`、`git diff --check`も成功。
+
+実API v67は`different_activity_does_not_clear_disinterest`単独で完了し、期待条件1/1。候補は「カフェは苦手なので、今回は遠慮します。」「カフェは苦手なので、今回は難しいです。」「カフェは苦手です。今回はやめておきます。」。独立本文レビューは誘いを断る文面としてPASS。2案は拒否がやわらかく、1案は明確だが候補差は小さめ。「難しい」は日程都合にも読めるという留意点がある。artifactはTempの`aichat-tapple-different-disinterest-v67-current-20261011.json`。
+
+全14ケースの実API v68は12件を試行し、`declining_engagement`でHTTP 502となり未完了。期待条件は5/14、quality FAIL。11件の独立本文レビューは`explicit_interest`、`shared_activity_low_reciprocity`、`different_activity_does_not_clear_disinterest`、`accepted_invitation`、`tentative_interest`が本文PASS。ただしlow-reciprocityは返信本文に誘いがない一方、strategyが期待`wait`に対して`continue`で自動FAIL。`mutual_activity_interest`と`unlisted_shared_hobby`は期待inviteに対してcontinueで、必要な誘いがなく本文もFAIL。`recent_activity_disinterest`は文脈には合うが「カフェは得意ではない」が不自然。meeting hesitation/safetyはevidenceの自動FAILに加えて相手の視点を取り違えた候補があり、ambiguous interestは一部候補が自然だが全体で差が残る。artifactはTempの`aichat-tapple-full-v68-current-20261011.json`。
+
+未試行の最後2件をv69で選択実行したところ2/2生成完了だが期待条件0/2。`counterproposal`は会話にない本人の日曜の空きを肯定し、候補全体でFAIL。`decline`はstop後に「ですよね／わかりました／そうですね」と返すのみで、候補の差が乏しく、stop境界にも合わずFAIL。artifactはTempの`aichat-tapple-final-two-v69-current-20261011.json`。全文レビューは生成本文の品質とstrategy/evidence runner判定を分けて実施した。
+
+Tapple全体、Contact B全体、最新70ケースの受け入れは未達で、Step 18-R4は未完了。評価器・閾値・canonicalケースは変更していない。作業は未コミットのままbranch `codex/chat-quality-20261008` に保持し、pushしていない。次はv68/v69で残ったinvite/continue/wait/stopの境界、拒否後の返信、受諾後・日程調整、迷い/安全ケース、Bの自然さと候補差を根拠から修正し、実API・独立レビュー・全テストを再実行する。
